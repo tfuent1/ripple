@@ -1,0 +1,13 @@
+[package]
+name = "ripple-ffi"
+description = "C FFI surface for Ripple core (iOS/Android)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ripple_ffi"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+ripple-core = { path = "../core" }
