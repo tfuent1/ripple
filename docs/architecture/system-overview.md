@@ -1,4 +1,3 @@
-````markdown
 # System Overview
 
 Ripple is organized as a protocol core surrounded by platform-specific client
