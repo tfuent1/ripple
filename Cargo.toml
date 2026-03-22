@@ -15,7 +15,7 @@ repository = "https://github.com/tfuent1/ripple"
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
-uuid = { version = "1.6", features = ["v4"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 rmp-serde = "1.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
