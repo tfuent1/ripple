@@ -14,10 +14,10 @@ messages — with all cryptographic guarantees intact.
 
 ## Success Criteria
 
-- [ ] Ed25519 keypair generation and persistence
-- [ ] Bundle creation, signing, and signature verification
-- [ ] Bundle serialization and deserialization (MessagePack)
-- [ ] Direct message encryption and decryption (X25519 + XSalsa20-Poly1305)
+- [x] Ed25519 keypair generation and persistence
+- [x] Bundle creation, signing, and signature verification
+- [x] Bundle serialization and deserialization (MessagePack)
+- [x] Direct message encryption and decryption (X25519 + ChaCha20-Poly1305)
 - [ ] SQLite store — insert, query, expire, and delete bundles
 - [ ] Peer encounter logging
 - [ ] Spray and Wait routing — correct spray count tracking per bundle
@@ -64,7 +64,11 @@ No bundle can be created, signed, or encrypted until this module exists.
 
 **Crates to add:**
 ```toml
-sodiumoxide = "0.2"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
 ```
 
 ---

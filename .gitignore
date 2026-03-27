@@ -12,3 +12,4 @@ Cargo.lock
 *.dylib
 dist/
 
+claude/

@@ -6,3 +6,5 @@
 | [ADR-002](./ADR-002-native-mobile.md) | Native Swift + Kotlin for mobile | Accepted |
 | [ADR-003](./ADR-003-transport-stack.md) | Multi-transport mesh stack | Accepted |
 | [ADR-004](./ADR-004-dtn-routing.md) | Custom lightweight DTN routing | Accepted |
+| [ADR-005](./ADR-005-pure-rust-crypto.md) | Pure Rust crypto — no libsodium | Accepted |
+| [ADR-006](./ADR-006-two-key-identity.md) | Two-key identity model | Accepted |
