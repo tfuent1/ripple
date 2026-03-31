@@ -24,7 +24,7 @@ messages — with all cryptographic guarantees intact.
 - [x] SOS priority epidemic routing
 - [x] Bundle TTL expiry via `mesh_tick`
 - [x] LWW-CRDT for shared state (map pins, resource posts)
-- [ ] FFI surface compiles cleanly for both staticlib and cdylib targets
+- [x] FFI surface compiles cleanly for both staticlib and cdylib targets
 - [ ] CLI daemon starts, generates or loads identity, prints public key
 - [ ] CLI daemon connects to rendezvous server and submits a bundle
 - [ ] CLI daemon polls rendezvous server inbox and receives a bundle
