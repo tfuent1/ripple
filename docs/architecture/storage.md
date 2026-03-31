@@ -78,12 +78,5 @@ window without scanning the full table.
 
 ## Future Considerations
 
-- Spray count tracking per bundle will be added to the `bundles` table in
-  Milestone 1.4 when Spray and Wait logic is implemented in `routing.rs`.
 - Delivery receipts and retry tracking may replace the simple `delivered` flag
   in a later phase.
-- The `transport` codes in the `encounters` table will be formalized as a
-  `Transport` enum in `peer.rs` (Milestone 1.4).
-```
-
-
