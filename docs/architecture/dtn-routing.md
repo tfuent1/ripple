@@ -139,7 +139,7 @@ pub struct SyncOffer {
   in Phase 3.
 - Interactive routing mode (dense network path-based routing) is a Phase 5
   addition — the current implementation is DTN store-and-forward only.
-- The `UpdateSharedState` action is defined but not yet emitted — it becomes
-  active when `crdt.rs` is implemented in Milestone 1.5.
-```
+`- The `UpdateSharedState` action is defined but not yet emitted — it will be
+  wired into `on_bundle_received` when bundles carrying CRDT payloads are
+  introduced in a later milestone.``
 

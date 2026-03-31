@@ -18,12 +18,12 @@ messages — with all cryptographic guarantees intact.
 - [x] Bundle creation, signing, and signature verification
 - [x] Bundle serialization and deserialization (MessagePack)
 - [x] Direct message encryption and decryption (X25519 + ChaCha20-Poly1305)
-- [ ] SQLite store — insert, query, expire, and delete bundles
-- [ ] Peer encounter logging
-- [ ] Spray and Wait routing — correct spray count tracking per bundle
-- [ ] SOS priority epidemic routing
-- [ ] Bundle TTL expiry via `mesh_tick`
-- [ ] LWW-CRDT for shared state (map pins, resource posts)
+- [x] SQLite store — insert, query, expire, and delete bundles
+- [x] Peer encounter logging
+- [x] Spray and Wait routing — correct spray count tracking per bundle
+- [x] SOS priority epidemic routing
+- [x] Bundle TTL expiry via `mesh_tick`
+- [x] LWW-CRDT for shared state (map pins, resource posts)
 - [ ] FFI surface compiles cleanly for both staticlib and cdylib targets
 - [ ] CLI daemon starts, generates or loads identity, prints public key
 - [ ] CLI daemon connects to rendezvous server and submits a bundle
