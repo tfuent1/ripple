@@ -11,3 +11,6 @@ crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 ripple-core = { path = "../core" }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
