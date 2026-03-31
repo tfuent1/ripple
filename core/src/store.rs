@@ -61,13 +61,14 @@ impl Store {
             PRAGMA journal_mode = WAL;
 
             CREATE TABLE IF NOT EXISTS bundles (
-                id          TEXT    PRIMARY KEY,
-                destination TEXT    NOT NULL,
-                dest_pubkey BLOB,           -- X25519 pubkey for Peer bundles, NULL for Broadcast
-                priority    INTEGER NOT NULL,
-                expires_at  INTEGER,        -- NULL for SOS bundles
-                delivered   INTEGER NOT NULL DEFAULT 0,
-                raw         BLOB    NOT NULL -- full MessagePack serialized bundle
+                id               TEXT    PRIMARY KEY,
+                destination      TEXT    NOT NULL,
+                dest_pubkey      BLOB,           -- X25519 pubkey for Peer bundles, NULL for Broadcast
+                priority         INTEGER NOT NULL,
+                expires_at       INTEGER,        -- NULL for SOS bundles
+                delivered        INTEGER NOT NULL DEFAULT 0,
+                spray_remaining  INTEGER,        -- NULL for SOS (epidemic), 0 = Waiting phase
+                raw              BLOB    NOT NULL -- full MessagePack serialized bundle
             );
 
             CREATE INDEX IF NOT EXISTS idx_bundles_dest_pubkey
@@ -108,13 +109,14 @@ impl Store {
         let priority = bundle.priority as u8;
         let raw = bundle.to_bytes()?;
 
+        let spray_remaining: Option<u8> = bundle.priority.spray_count();
+
         self.conn.execute(
             "INSERT OR REPLACE INTO bundles
-                (id, destination, dest_pubkey, priority, expires_at, raw)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, destination, dest_pubkey, priority, bundle.expires_at, raw],
+                (id, destination, dest_pubkey, priority, expires_at, spray_remaining, raw)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, destination, dest_pubkey, priority, bundle.expires_at, spray_remaining, raw],
         )?;
-
         Ok(())
     }
 
@@ -196,6 +198,39 @@ impl Store {
         // `execute` returns the number of rows affected as usize.
         // We cast to u32 — safe because we'll never delete 4 billion rows.
         Ok(count as u32)
+    }
+
+    /// Decrement the spray count for a bundle by 1.
+    ///
+    /// Returns the new spray_remaining value, or None if the bundle uses
+    /// epidemic routing (SOS) or was not found.
+    ///
+    /// When spray_remaining reaches 0, the bundle enters the Waiting phase —
+    /// the router stops actively spraying it and waits for a direct encounter
+    /// with the destination peer.
+    pub fn decrement_spray(&self, id: Uuid) -> Result<Option<u8>, StoreError> {
+        self.conn.execute(
+            "UPDATE bundles
+             SET spray_remaining = spray_remaining - 1
+             WHERE id = ?1
+               AND spray_remaining IS NOT NULL
+               AND spray_remaining > 0",
+            params![id.to_string()],
+        )?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT spray_remaining FROM bundles WHERE id = ?1"
+        )?;
+
+        let result = stmt.query_row(params![id.to_string()], |row| {
+            row.get::<_, Option<u8>>(0)
+        });
+
+        match result {
+            Ok(val) => Ok(val),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Db(e)),
+        }
     }
 
     // ── Encounter operations ──────────────────────────────────────────────────
@@ -401,5 +436,60 @@ mod tests {
         let encounters = store.recent_encounters(NOW + 1).unwrap();
         assert_eq!(encounters.len(), 1);
         assert_eq!(encounters[0].seen_at, NOW + 3600);
+    }
+
+    #[test]
+    fn test_spray_remaining_initialized() {
+        let store = test_store();
+        let identity = Identity::generate();
+
+        let normal = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"spray me".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        let sos = BundleBuilder::new(Destination::Broadcast, Priority::Sos)
+            .payload(b"mayday".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        store.insert_bundle(&normal).unwrap();
+        store.insert_bundle(&sos).unwrap();
+
+        // Normal bundles start with spray_count() copies.
+        let mut stmt = store.conn.prepare(
+            "SELECT spray_remaining FROM bundles WHERE id = ?1"
+        ).unwrap();
+
+        let normal_spray: Option<u8> = stmt.query_row(
+            params![normal.id.to_string()], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(normal_spray, Some(6));
+
+        let sos_spray: Option<u8> = stmt.query_row(
+            params![sos.id.to_string()], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(sos_spray, None); // epidemic — no limit
+    }
+
+    #[test]
+    fn test_decrement_spray() {
+        let store = test_store();
+        let identity = Identity::generate();
+
+        let bundle = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"spray".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        let id = bundle.id;
+        store.insert_bundle(&bundle).unwrap();
+
+        // Normal starts at 6.
+        let remaining = store.decrement_spray(id).unwrap();
+        assert_eq!(remaining, Some(5));
+
+        let remaining = store.decrement_spray(id).unwrap();
+        assert_eq!(remaining, Some(4));
     }
 }
