@@ -48,17 +48,21 @@ pub enum CrdtValue {
 /// this is acceptable — the stakes are low and clock skew is bounded in practice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LWWRegister {
-    pub value:      CrdtValue,
+    pub value: CrdtValue,
     /// Unix timestamp seconds. Higher wins on merge.
-    pub timestamp:  i64,
+    pub timestamp: i64,
     /// Ed25519 pubkey of the author. Tiebreaker when timestamps match.
-    pub author:     [u8; 32],
+    pub author: [u8; 32],
 }
 
 impl LWWRegister {
     /// Create a new register with an initial value.
     pub fn new(value: CrdtValue, timestamp: i64, author: [u8; 32]) -> Self {
-        Self { value, timestamp, author }
+        Self {
+            value,
+            timestamp,
+            author,
+        }
     }
 
     /// Update the register. The new value only takes effect if it would win
@@ -66,18 +70,18 @@ impl LWWRegister {
     /// larger author key. This keeps local state consistent with merge semantics.
     pub fn set(&mut self, value: CrdtValue, timestamp: i64, author: [u8; 32]) {
         if Self::wins_over(timestamp, &author, self.timestamp, &self.author) {
-            self.value     = value;
+            self.value = value;
             self.timestamp = timestamp;
-            self.author    = author;
+            self.author = author;
         }
     }
 
     /// Merge another register into this one. The winner is retained in place.
     pub fn merge(&mut self, other: &LWWRegister) {
         if Self::wins_over(other.timestamp, &other.author, self.timestamp, &self.author) {
-            self.value     = other.value.clone();
+            self.value = other.value.clone();
             self.timestamp = other.timestamp;
-            self.author    = other.author;
+            self.author = other.author;
         }
     }
 
@@ -133,7 +137,7 @@ impl LWWRegister {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ORSet {
     /// Each live or formerly-live element: tag → value.
-    add_set:    HashMap<Uuid, CrdtValue>,
+    add_set: HashMap<Uuid, CrdtValue>,
     /// Tags that have been explicitly removed.
     remove_set: HashSet<Uuid>,
 }
@@ -141,7 +145,7 @@ pub struct ORSet {
 impl ORSet {
     pub fn new() -> Self {
         Self {
-            add_set:    HashMap::new(),
+            add_set: HashMap::new(),
             remove_set: HashSet::new(),
         }
     }
@@ -160,7 +164,8 @@ impl ORSet {
     /// add_set). Concurrent adds by other nodes with new tags are unaffected.
     pub fn remove(&mut self, value: &CrdtValue) {
         // Collect all tags associated with this value that are currently live.
-        let tags_to_remove: Vec<Uuid> = self.add_set
+        let tags_to_remove: Vec<Uuid> = self
+            .add_set
             .iter()
             .filter(|(tag, v)| *v == value && !self.remove_set.contains(tag))
             .map(|(tag, _)| *tag)
@@ -238,30 +243,31 @@ impl Default for ORSet {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedState {
     pub registers: HashMap<String, LWWRegister>,
-    pub sets:      HashMap<String, ORSet>,
+    pub sets: HashMap<String, ORSet>,
 }
 
 impl SharedState {
     pub fn new() -> Self {
         Self {
             registers: HashMap::new(),
-            sets:      HashMap::new(),
+            sets: HashMap::new(),
         }
     }
 
     /// Set a named register value.
     pub fn set_register(
         &mut self,
-        key:       impl Into<String>,
-        value:     CrdtValue,
+        key: impl Into<String>,
+        value: CrdtValue,
         timestamp: i64,
-        author:    [u8; 32],
+        author: [u8; 32],
     ) {
         let key = key.into();
         match self.registers.get_mut(&key) {
             Some(reg) => reg.set(value, timestamp, author),
-            None      => {
-                self.registers.insert(key, LWWRegister::new(value, timestamp, author));
+            None => {
+                self.registers
+                    .insert(key, LWWRegister::new(value, timestamp, author));
             }
         }
     }
@@ -277,9 +283,7 @@ impl SharedState {
     /// for "give me the value at this key, inserting a default if absent." We've
     /// seen this before in PeerManager — same pattern, different type.
     pub fn get_or_create_set(&mut self, key: impl Into<String>) -> &mut ORSet {
-        self.sets
-            .entry(key.into())
-            .or_default()
+        self.sets.entry(key.into()).or_default()
     }
     /// Read access to a named set.
     pub fn get_set(&self, key: &str) -> Option<&ORSet> {
@@ -301,7 +305,7 @@ impl SharedState {
         for (key, reg_a) in &a.registers {
             let merged = match b.registers.get(key) {
                 Some(reg_b) => LWWRegister::merged(reg_a, reg_b),
-                None        => reg_a.clone(),
+                None => reg_a.clone(),
             };
             result.registers.insert(key.clone(), merged);
         }
@@ -316,7 +320,7 @@ impl SharedState {
         for (key, set_a) in &a.sets {
             let merged = match b.sets.get(key) {
                 Some(set_b) => ORSet::merged(set_a, set_b),
-                None        => set_a.clone(),
+                None => set_a.clone(),
             };
             result.sets.insert(key.clone(), merged);
         }
@@ -354,15 +358,15 @@ mod tests {
 
     // Fixed pubkeys for deterministic tiebreaker tests.
     const ALICE: [u8; 32] = [1u8; 32];
-    const BOB:   [u8; 32] = [2u8; 32];
-    const NOW:   i64       = 1_700_000_000;
+    const BOB: [u8; 32] = [2u8; 32];
+    const NOW: i64 = 1_700_000_000;
 
     // ── LWWRegister ───────────────────────────────────────────────────────────
 
     #[test]
     fn test_lww_higher_timestamp_wins() {
         let mut reg = LWWRegister::new(CrdtValue::Text("old".into()), NOW, ALICE);
-        let newer   = LWWRegister::new(CrdtValue::Text("new".into()), NOW + 1, BOB);
+        let newer = LWWRegister::new(CrdtValue::Text("new".into()), NOW + 1, BOB);
         reg.merge(&newer);
         assert_eq!(reg.value, CrdtValue::Text("new".into()));
     }
@@ -370,7 +374,7 @@ mod tests {
     #[test]
     fn test_lww_lower_timestamp_loses() {
         let mut reg = LWWRegister::new(CrdtValue::Text("current".into()), NOW + 1, ALICE);
-        let stale   = LWWRegister::new(CrdtValue::Text("stale".into()), NOW, BOB);
+        let stale = LWWRegister::new(CrdtValue::Text("stale".into()), NOW, BOB);
         reg.merge(&stale);
         assert_eq!(reg.value, CrdtValue::Text("current".into()));
     }
@@ -379,14 +383,14 @@ mod tests {
     fn test_lww_tiebreaker_larger_pubkey_wins() {
         // BOB = [2u8; 32], ALICE = [1u8; 32] — BOB is larger.
         let alice_reg = LWWRegister::new(CrdtValue::Text("alice".into()), NOW, ALICE);
-        let bob_reg   = LWWRegister::new(CrdtValue::Text("bob".into()),   NOW, BOB);
-        let merged    = LWWRegister::merged(&alice_reg, &bob_reg);
+        let bob_reg = LWWRegister::new(CrdtValue::Text("bob".into()), NOW, BOB);
+        let merged = LWWRegister::merged(&alice_reg, &bob_reg);
         assert_eq!(merged.value, CrdtValue::Text("bob".into()));
     }
 
     #[test]
     fn test_lww_commutativity() {
-        let a = LWWRegister::new(CrdtValue::Int(1), NOW,     ALICE);
+        let a = LWWRegister::new(CrdtValue::Int(1), NOW, ALICE);
         let b = LWWRegister::new(CrdtValue::Int(2), NOW + 1, BOB);
 
         let ab = LWWRegister::merged(&a, &b);
@@ -396,14 +400,14 @@ mod tests {
 
     #[test]
     fn test_lww_idempotency() {
-        let a      = LWWRegister::new(CrdtValue::Int(42), NOW, ALICE);
+        let a = LWWRegister::new(CrdtValue::Int(42), NOW, ALICE);
         let merged = LWWRegister::merged(&a, &a);
         assert_eq!(merged, a); // merge(A, A) == A
     }
 
     #[test]
     fn test_lww_associativity() {
-        let a = LWWRegister::new(CrdtValue::Int(1), NOW,     ALICE);
+        let a = LWWRegister::new(CrdtValue::Int(1), NOW, ALICE);
         let b = LWWRegister::new(CrdtValue::Int(2), NOW + 1, BOB);
         let c = LWWRegister::new(CrdtValue::Int(3), NOW + 2, ALICE);
 
@@ -467,10 +471,16 @@ mod tests {
         let ba = ORSet::merged(&b, &a);
 
         // Same elements, regardless of merge order.
-        let mut ab_elems: Vec<String> = ab.elements().into_iter()
-            .map(|v| format!("{:?}", v)).collect();
-        let mut ba_elems: Vec<String> = ba.elements().into_iter()
-            .map(|v| format!("{:?}", v)).collect();
+        let mut ab_elems: Vec<String> = ab
+            .elements()
+            .into_iter()
+            .map(|v| format!("{:?}", v))
+            .collect();
+        let mut ba_elems: Vec<String> = ba
+            .elements()
+            .into_iter()
+            .map(|v| format!("{:?}", v))
+            .collect();
         ab_elems.sort();
         ba_elems.sort();
         assert_eq!(ab_elems, ba_elems);
@@ -500,10 +510,16 @@ mod tests {
         let ab_c = ORSet::merged(&ORSet::merged(&a, &b), &c);
         let a_bc = ORSet::merged(&a, &ORSet::merged(&b, &c));
 
-        let mut ab_c_elems: Vec<String> = ab_c.elements().into_iter()
-            .map(|v| format!("{:?}", v)).collect();
-        let mut a_bc_elems: Vec<String> = a_bc.elements().into_iter()
-            .map(|v| format!("{:?}", v)).collect();
+        let mut ab_c_elems: Vec<String> = ab_c
+            .elements()
+            .into_iter()
+            .map(|v| format!("{:?}", v))
+            .collect();
+        let mut a_bc_elems: Vec<String> = a_bc
+            .elements()
+            .into_iter()
+            .map(|v| format!("{:?}", v))
+            .collect();
         ab_c_elems.sort();
         a_bc_elems.sort();
         assert_eq!(ab_c_elems, a_bc_elems);
@@ -548,9 +564,11 @@ mod tests {
     fn test_shared_state_serialization_roundtrip() {
         let mut state = SharedState::new();
         state.set_register("status", CrdtValue::Text("ok".into()), NOW, ALICE);
-        state.get_or_create_set("pins").add(CrdtValue::Bytes(vec![1, 2, 3]));
+        state
+            .get_or_create_set("pins")
+            .add(CrdtValue::Bytes(vec![1, 2, 3]));
 
-        let bytes    = state.to_bytes().unwrap();
+        let bytes = state.to_bytes().unwrap();
         let restored = SharedState::from_bytes(&bytes).unwrap();
         assert_eq!(state, restored);
     }

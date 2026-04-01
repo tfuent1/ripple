@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
         format!("{home}/.ripple/mesh.db")
     };
 
-    let store  = Store::new(&db_path)?;
+    let store = Store::new(&db_path)?;
     let router = Router::new(store, identity.x25519_public_key());
 
     match cli.command {

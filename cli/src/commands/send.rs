@@ -11,14 +11,11 @@ pub fn run(
     message: &str,
     to_pubkey_hex: Option<&str>,
 ) -> anyhow::Result<()> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs() as i64;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     let destination = match to_pubkey_hex {
         Some(hex_str) => {
-            let bytes = hex::decode(hex_str)
-                .map_err(|_| anyhow::anyhow!("invalid pubkey hex"))?;
+            let bytes = hex::decode(hex_str).map_err(|_| anyhow::anyhow!("invalid pubkey hex"))?;
             let arr: [u8; 32] = bytes
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("pubkey must be 32 bytes"))?;

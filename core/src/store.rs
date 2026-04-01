@@ -1,5 +1,6 @@
 use crate::bundle::Bundle;
-use rusqlite::{Connection, params};
+use crate::peer::Transport;
+use rusqlite::{params, Connection};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,9 +27,9 @@ pub enum StoreError {
 #[derive(Debug, Clone)]
 pub struct Encounter {
     pub peer_pubkey: [u8; 32],
-    pub transport:   u8,
-    pub rssi:        i32,
-    pub seen_at:     i64,
+    pub transport: Transport,
+    pub rssi: i32,
+    pub seen_at: i64,
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -57,40 +58,58 @@ impl Store {
 
     /// Create tables if they don't exist. Safe to run on every startup.
     fn migrate(&self) -> Result<(), StoreError> {
-        self.conn.execute_batch("
-            PRAGMA journal_mode = WAL;
+        // WAL mode first — applies to all schema versions.
+        self.conn.execute_batch("PRAGMA journal_mode = WAL;")?;
 
-            CREATE TABLE IF NOT EXISTS bundles (
-                id               TEXT    PRIMARY KEY,
-                destination      TEXT    NOT NULL,
-                dest_pubkey      BLOB,
-                priority         INTEGER NOT NULL,
-                expires_at       INTEGER,
-                delivered        INTEGER NOT NULL DEFAULT 0,
-                displayed        INTEGER NOT NULL DEFAULT 0,  -- 1 after message is printed to user
-                spray_remaining  INTEGER,
-                raw              BLOB    NOT NULL
-            );
-            -- NOTE: migrate() uses CREATE TABLE IF NOT EXISTS, so this column only
-            -- appears in new databases. Delete ~/.ripple/mesh.db to pick it up.
+        // Read current schema version. SQLite's user_version PRAGMA is an
+        // integer stored in the DB header — no extra table needed.
+        // It starts at 0 for new databases.
+        let version: u32 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
-            CREATE INDEX IF NOT EXISTS idx_bundles_dest_pubkey
-                ON bundles (dest_pubkey) WHERE dest_pubkey IS NOT NULL;
+        // Each arm is additive — run only the migrations the DB still needs.
+        // Never modify a migration that has already shipped; always add a new one.
+        if version < 1 {
+            self.conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS bundles (
+                    id               TEXT    PRIMARY KEY,
+                    destination      TEXT    NOT NULL,
+                    dest_pubkey      BLOB,
+                    priority         INTEGER NOT NULL,
+                    expires_at       INTEGER,
+                    delivered        INTEGER NOT NULL DEFAULT 0,
+                    displayed        INTEGER NOT NULL DEFAULT 0,
+                    spray_remaining  INTEGER,
+                    raw              BLOB    NOT NULL
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_bundles_expires_at
-                ON bundles (expires_at) WHERE expires_at IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_bundles_dest_pubkey
+                    ON bundles (dest_pubkey) WHERE dest_pubkey IS NOT NULL;
 
-            CREATE TABLE IF NOT EXISTS encounters (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                peer_pubkey BLOB    NOT NULL,
-                transport   INTEGER NOT NULL,
-                rssi        INTEGER NOT NULL,
-                seen_at     INTEGER NOT NULL
-            );
+                CREATE INDEX IF NOT EXISTS idx_bundles_expires_at
+                    ON bundles (expires_at) WHERE expires_at IS NOT NULL;
 
-            CREATE INDEX IF NOT EXISTS idx_encounters_seen_at
-                ON encounters (seen_at);
-        ")?;
+                CREATE TABLE IF NOT EXISTS encounters (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    peer_pubkey BLOB    NOT NULL,
+                    transport   INTEGER NOT NULL,
+                    rssi        INTEGER NOT NULL,
+                    seen_at     INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_encounters_seen_at
+                    ON encounters (seen_at);
+
+                PRAGMA user_version = 1;
+            ",
+            )?;
+        }
+
+        // Future migrations follow the same pattern:
+        // if version < 2 { self.conn.execute_batch("ALTER TABLE ...; PRAGMA user_version = 2;")?; }
+
         Ok(())
     }
 
@@ -118,7 +137,15 @@ impl Store {
             "INSERT OR REPLACE INTO bundles
                 (id, destination, dest_pubkey, priority, expires_at, spray_remaining, raw)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, destination, dest_pubkey, priority, bundle.expires_at, spray_remaining, raw],
+            params![
+                id,
+                destination,
+                dest_pubkey,
+                priority,
+                bundle.expires_at,
+                spray_remaining,
+                raw
+            ],
         )?;
         Ok(())
     }
@@ -130,9 +157,9 @@ impl Store {
     /// `Some(bundle)` or `None` — at the call site.
     pub fn get_bundle(&self, id: Uuid) -> Result<Option<Bundle>, StoreError> {
         let id_str = id.to_string();
-        let mut stmt = self.conn.prepare(
-            "SELECT raw FROM bundles WHERE id = ?1 AND delivered = 0"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT raw FROM bundles WHERE id = ?1 AND delivered = 0")?;
 
         // `query_row` returns `Err(QueryReturnedNoRows)` when nothing is found.
         // We convert that specific error into `Ok(None)` — anything else propagates.
@@ -158,7 +185,7 @@ impl Store {
     pub fn bundles_for_peer(&self, peer_pubkey: &[u8; 32]) -> Result<Vec<Bundle>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT raw FROM bundles
-             WHERE dest_pubkey = ?1 AND delivered = 0"
+             WHERE dest_pubkey = ?1 AND delivered = 0",
         )?;
 
         // `query_map` iterates over rows, applying a closure to each.
@@ -178,7 +205,7 @@ impl Store {
         Ok(bundles)
     }
 
-        /// Return all bundles not yet delivered, regardless of destination.
+    /// Return all bundles not yet delivered, regardless of destination.
     ///
     /// Used by the CLI relay loop to submit outbound bundles to the
     /// rendezvous server. In Phase 1 we relay everything; Phase 3 will
@@ -189,9 +216,9 @@ impl Store {
     /// `query_map` with no params is just a full-table scan — same pattern
     /// as `bundles_for_peer` but without the WHERE clause.
     pub fn all_undelivered(&self) -> Result<Vec<Bundle>, StoreError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT raw FROM bundles WHERE delivered = 0"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT raw FROM bundles WHERE delivered = 0")?;
 
         let bundles = stmt
             .query_map([], |row| {
@@ -279,13 +306,11 @@ impl Store {
             params![id.to_string()],
         )?;
 
-        let mut stmt = self.conn.prepare(
-            "SELECT spray_remaining FROM bundles WHERE id = ?1"
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT spray_remaining FROM bundles WHERE id = ?1")?;
 
-        let result = stmt.query_row(params![id.to_string()], |row| {
-            row.get::<_, Option<u8>>(0)
-        });
+        let result = stmt.query_row(params![id.to_string()], |row| row.get::<_, Option<u8>>(0));
 
         match result {
             Ok(val) => Ok(val),
@@ -321,7 +346,7 @@ impl Store {
             "SELECT peer_pubkey, transport, rssi, seen_at
              FROM encounters
              WHERE seen_at >= ?1
-             ORDER BY seen_at DESC"
+             ORDER BY seen_at DESC",
         )?;
 
         let encounters = stmt
@@ -337,11 +362,12 @@ impl Store {
                         rusqlite::types::Type::Blob,
                     )
                 })?;
+                let transport_raw: u8 = row.get(1)?;
                 Ok(Encounter {
                     peer_pubkey,
-                    transport: row.get(1)?,
-                    rssi:      row.get(2)?,
-                    seen_at:   row.get(3)?,
+                    transport: Transport::from_u8(transport_raw).unwrap_or(Transport::Internet),
+                    rssi: row.get(2)?,
+                    seen_at: row.get(3)?,
                 })
             })?
             .collect::<Result<Vec<Encounter>, rusqlite::Error>>()?;
@@ -357,6 +383,7 @@ mod tests {
     use super::*;
     use crate::bundle::{BundleBuilder, Destination, Priority};
     use crate::crypto::Identity;
+    use crate::peer::Transport;
 
     const NOW: i64 = 1_700_000_000;
 
@@ -416,13 +443,11 @@ mod tests {
         let bob = Identity::generate();
 
         // One bundle for Bob, one broadcast.
-        let for_bob = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"hey bob".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let for_bob =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+                .payload(b"hey bob".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         let broadcast = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
             .payload(b"everyone".to_vec())
@@ -481,6 +506,7 @@ mod tests {
         let encounters = store.recent_encounters(NOW - 1).unwrap();
         assert_eq!(encounters.len(), 2);
         assert_eq!(encounters[0].peer_pubkey, pubkey);
+        assert_eq!(encounters[0].transport, Transport::Ble);
         assert_eq!(encounters[0].rssi, -70); // most recent first
     }
 
@@ -518,18 +544,19 @@ mod tests {
         store.insert_bundle(&sos).unwrap();
 
         // Normal bundles start with spray_count() copies.
-        let mut stmt = store.conn.prepare(
-            "SELECT spray_remaining FROM bundles WHERE id = ?1"
-        ).unwrap();
+        let mut stmt = store
+            .conn
+            .prepare("SELECT spray_remaining FROM bundles WHERE id = ?1")
+            .unwrap();
 
-        let normal_spray: Option<u8> = stmt.query_row(
-            params![normal.id.to_string()], |r| r.get(0)
-        ).unwrap();
+        let normal_spray: Option<u8> = stmt
+            .query_row(params![normal.id.to_string()], |r| r.get(0))
+            .unwrap();
         assert_eq!(normal_spray, Some(6));
 
-        let sos_spray: Option<u8> = stmt.query_row(
-            params![sos.id.to_string()], |r| r.get(0)
-        ).unwrap();
+        let sos_spray: Option<u8> = stmt
+            .query_row(params![sos.id.to_string()], |r| r.get(0))
+            .unwrap();
         assert_eq!(sos_spray, None); // epidemic — no limit
     }
 
@@ -554,20 +581,17 @@ mod tests {
         assert_eq!(remaining, Some(4));
     }
 
-        #[test]
+    #[test]
     fn test_mark_displayed_and_unread_count() {
         let store = test_store();
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
 
         // Create a peer bundle (direct message) and a broadcast.
-        let dm = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"hello bob".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let dm = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+            .payload(b"hello bob".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
 
         let broadcast = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
             .payload(b"everyone".to_vec())
@@ -615,19 +639,16 @@ mod tests {
     fn test_all_undelivered() {
         let store = test_store();
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
 
         let b1 = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
             .payload(b"one".to_vec())
             .build(&alice, NOW)
             .unwrap();
-        let b2 = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"two".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let b2 = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+            .payload(b"two".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
 
         store.insert_bundle(&b1).unwrap();
         store.insert_bundle(&b2).unwrap();

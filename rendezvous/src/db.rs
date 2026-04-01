@@ -65,11 +65,10 @@ impl Db {
     /// Returns `true` if the bundle was newly inserted, `false` if it was
     /// already present (INSERT OR IGNORE).
     pub fn insert_bundle(&self, raw: &[u8]) -> Result<bool, DbError> {
-        let bundle = Bundle::from_bytes(raw)
-            .map_err(|e| DbError::BundleParse(e.to_string()))?;
+        let bundle = Bundle::from_bytes(raw).map_err(|e| DbError::BundleParse(e.to_string()))?;
 
         let dest_pubkey_hex = match &bundle.destination {
-            Destination::Peer(pk)  => hex::encode(pk),
+            Destination::Peer(pk) => hex::encode(pk),
             Destination::Broadcast => "broadcast".to_string(),
         };
 
@@ -100,9 +99,9 @@ impl Db {
             [],
         )?;
 
-        let mut stmt = self.conn.prepare(
-            "SELECT raw FROM bundles WHERE dest_pubkey = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT raw FROM bundles WHERE dest_pubkey = ?1")?;
 
         // `query_map` gives us an iterator of `Result<T, rusqlite::Error>`.
         // `.collect::<Result<Vec<_>, _>>()` turns that into a single
@@ -118,10 +117,8 @@ impl Db {
 
     /// Delete a bundle by its UUID string. Used to acknowledge delivery.
     pub fn delete_bundle(&self, bundle_id: &str) -> Result<(), DbError> {
-        self.conn.execute(
-            "DELETE FROM bundles WHERE id = ?1",
-            params![bundle_id],
-        )?;
+        self.conn
+            .execute("DELETE FROM bundles WHERE id = ?1", params![bundle_id])?;
         Ok(())
     }
 }
@@ -157,7 +154,7 @@ mod tests {
     fn make_test_bundle_bytes(dest_x25519: [u8; 32]) -> Vec<u8> {
         use ripple_core::bundle::{BundleBuilder, Destination, Priority};
         use ripple_core::crypto::Identity;
-        
+
         let identity = Identity::generate();
         BundleBuilder::new(Destination::Peer(dest_x25519), Priority::Normal)
             .payload(b"test message".to_vec())
@@ -193,10 +190,10 @@ mod tests {
         let db = Db::open(":memory:").unwrap();
         let raw = make_test_bundle_bytes([2u8; 32]);
 
-        let first  = db.insert_bundle(&raw).unwrap();
+        let first = db.insert_bundle(&raw).unwrap();
         let second = db.insert_bundle(&raw).unwrap();
 
-        assert!(first,   "first insert: true");
+        assert!(first, "first insert: true");
         assert!(!second, "duplicate insert: false");
     }
 
@@ -204,7 +201,7 @@ mod tests {
     fn delete_bundle() {
         let db = Db::open(":memory:").unwrap();
         let dest = [3u8; 32];
-        let raw  = make_test_bundle_bytes(dest);
+        let raw = make_test_bundle_bytes(dest);
 
         db.insert_bundle(&raw).unwrap();
 

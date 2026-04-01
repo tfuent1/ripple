@@ -1,9 +1,11 @@
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
-    ChaCha20Poly1305, Nonce,
+    ChaCha20Poly1305, Key, Nonce,
 };
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use hkdf::Hkdf;
 use rand::rngs::OsRng as RandOsRng;
+use sha2::Sha256;
 use thiserror::Error;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use zeroize::ZeroizeOnDrop;
@@ -67,7 +69,7 @@ impl Identity {
     pub fn sign(&self, message: &[u8]) -> [u8; 64] {
         self.signing_key.sign(message).to_bytes()
     }
-    pub fn to_x25519_secret(&self) -> StaticSecret {
+    pub(crate) fn to_x25519_secret(&self) -> StaticSecret {
         StaticSecret::from(self.signing_key.to_bytes())
     }
 
@@ -94,10 +96,27 @@ pub fn verify_signature(
         .map_err(|_| CryptoError::VerificationFailed)
 }
 
+/// Derive a symmetric key from a raw X25519 shared secret using HKDF-SHA256.
+///
+/// Raw Diffie-Hellman output is not a uniformly random value — it lies on
+/// an elliptic curve and has mathematical structure. Passing it directly as
+/// a cipher key violates the "uniform random key" assumption that AEAD
+/// schemes require. HKDF extracts a proper uniform key from it.
+///
+/// The `info` label "ripple-v1-message" domain-separates this derivation.
+/// If the scheme ever changes, bump the label so old and new keys never collide.
+fn derive_key(shared_secret: &x25519_dalek::SharedSecret) -> Result<Key, CryptoError> {
+    let hk = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+    let mut key_bytes = [0u8; 32];
+    hk.expand(b"ripple-v1-message", &mut key_bytes)
+        .map_err(|_| CryptoError::EncryptionFailed)?;
+    Ok(*Key::from_slice(&key_bytes))
+}
+
 // ── Encryption / Decryption ───────────────────────────────────────────────────
 
 /// Encrypt a message for a recipient identified by their public key.
-/// 
+///
 /// Returns: nonce (12 bytes) + ciphertext, concatenated.
 /// The nonce is randomly generated per message and must be sent with it.
 pub fn encrypt(
@@ -111,9 +130,7 @@ pub fn encrypt(
     let sender_secret = sender_identity.to_x25519_secret();
     let shared_secret = sender_secret.diffie_hellman(&recipient_x25519_pub);
 
-    // Use the shared secret as the symmetric key for ChaCha20-Poly1305.
-    let cipher = ChaCha20Poly1305::new_from_slice(shared_secret.as_bytes())
-        .map_err(|_| CryptoError::EncryptionFailed)?;
+    let cipher = ChaCha20Poly1305::new(&derive_key(&shared_secret)?);
 
     // Random nonce — must never repeat for the same key.
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
@@ -148,8 +165,9 @@ pub fn decrypt(
     let recipient_secret = recipient_identity.to_x25519_secret();
     let shared_secret = recipient_secret.diffie_hellman(&sender_x25519_pub);
 
-    let cipher = ChaCha20Poly1305::new_from_slice(shared_secret.as_bytes())
-        .map_err(|_| CryptoError::DecryptionFailed)?;
+    let cipher = ChaCha20Poly1305::new(
+        &derive_key(&shared_secret).map_err(|_| CryptoError::DecryptionFailed)?,
+    );
 
     cipher
         .decrypt(nonce, ciphertext)
@@ -190,10 +208,9 @@ mod tests {
         let alice = Identity::generate();
         let bob = Identity::generate();
         let eve = Identity::generate();
-        
+
         let ciphertext = encrypt(&alice, &bob.x25519_public_key(), b"secret").unwrap();
         assert!(decrypt(&eve, &alice.x25519_public_key(), &ciphertext).is_err());
-
     }
 
     #[test]
@@ -205,4 +222,3 @@ mod tests {
         assert_eq!(identity.public_key(), restored.public_key());
     }
 }
-

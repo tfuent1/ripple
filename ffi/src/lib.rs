@@ -49,10 +49,10 @@ static ROUTER: OnceLock<Mutex<Router>> = OnceLock::new();
 
 // ── Return codes ──────────────────────────────────────────────────────────────
 
-const OK:               i32 = 0;
-const ERR_NOT_INIT:     i32 = -1;
-const ERR_SERIALIZE:    i32 = -2;
-const ERR_INTERNAL:     i32 = -3;
+const OK: i32 = 0;
+const ERR_NOT_INIT: i32 = -1;
+const ERR_SERIALIZE: i32 = -2;
+const ERR_INTERNAL: i32 = -3;
 
 // ── Helper: write an allocated buffer to out-params ───────────────────────────
 
@@ -70,13 +70,9 @@ const ERR_INTERNAL:     i32 = -3;
 /// `into_raw()` converts it to a raw pointer and *transfers ownership to the
 /// caller* — Rust will no longer track or free this memory. That's exactly what
 /// we want: the C caller owns the buffer until they call `mesh_free`.
-fn write_output<T: Serialize>(
-    value: &T,
-    out_ptr: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
+fn write_output<T: Serialize>(value: &T, out_ptr: *mut *mut u8, out_len: *mut usize) -> i32 {
     let bytes = match rmp_serde::to_vec(value) {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return ERR_SERIALIZE,
     };
 
@@ -113,22 +109,22 @@ fn write_output<T: Serialize>(
 /// `identity_bytes` must be a valid pointer to `identity_len` bytes, or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_init(
-    db_path:        *const u8,
-    db_path_len:    usize,
+    db_path: *const u8,
+    db_path_len: usize,
     identity_bytes: *const u8,
-    identity_len:   usize,
+    identity_len: usize,
 ) -> i32 {
     // SAFETY: we trust the caller passed a valid pointer + length.
     let path_bytes = unsafe { std::slice::from_raw_parts(db_path, db_path_len) };
     let path = match std::str::from_utf8(path_bytes) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(_) => return ERR_INTERNAL,
     };
 
     let identity = if identity_len == 32 {
         let key_bytes = unsafe { std::slice::from_raw_parts(identity_bytes, 32) };
         let arr: [u8; 32] = match key_bytes.try_into() {
-            Ok(a)  => a,
+            Ok(a) => a,
             Err(_) => return ERR_INTERNAL,
         };
         // All-zeros means "generate a new identity".
@@ -144,7 +140,7 @@ pub unsafe extern "C" fn mesh_init(
     let x25519_pubkey = identity.x25519_public_key();
 
     let store = match Store::new(path) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(_) => return ERR_INTERNAL,
     };
 
@@ -153,7 +149,7 @@ pub unsafe extern "C" fn mesh_init(
     // `set` returns Err if already initialized — that's fine, we just
     // return ERR_NOT_INIT to tell the caller they called init twice.
     match ROUTER.set(Mutex::new(router)) {
-        Ok(_)  => OK,
+        Ok(_) => OK,
         Err(_) => ERR_NOT_INIT,
     }
 }
@@ -171,23 +167,23 @@ pub unsafe extern "C" fn mesh_init(
 /// `out_offer_len`  — written with byte length of the above
 ///
 /// Caller must call `mesh_free(out_offer, out_offer_len)` when done.
-/// 
+///
 /// # Safety
 /// `ed25519_pubkey` and `x25519_pubkey` must each be valid pointers to 32 bytes.
 /// `out_offer` and `out_offer_len` must be valid writable pointers.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_peer_encountered(
-    ed25519_pubkey:  *const u8,
-    x25519_pubkey:   *const u8,
-    transport:       u8,
-    rssi:            i32,
-    now:             i64,
-    out_offer:       *mut *mut u8,
-    out_offer_len:   *mut usize,
+    ed25519_pubkey: *const u8,
+    x25519_pubkey: *const u8,
+    transport: u8,
+    rssi: i32,
+    now: i64,
+    out_offer: *mut *mut u8,
+    out_offer_len: *mut usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     // Read the two pubkeys from raw pointers.
@@ -199,38 +195,35 @@ pub unsafe extern "C" fn mesh_peer_encountered(
     // store.rs for the same reason: converting an unsized Vec into a fixed array.
     let ed_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(ed25519_pubkey, 32).try_into() {
-            Ok(a)  => a,
+            Ok(a) => a,
             Err(_) => return ERR_INTERNAL,
         }
     };
     let x_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(x25519_pubkey, 32).try_into() {
-            Ok(a)  => a,
+            Ok(a) => a,
             Err(_) => return ERR_INTERNAL,
         }
     };
 
     let transport = match Transport::from_u8(transport) {
         Some(t) => t,
-        None    => return ERR_INTERNAL,
+        None => return ERR_INTERNAL,
     };
 
     let mut router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL, // poisoned mutex
     };
 
     let offer: SyncOffer = match router.on_peer_encountered(ed_key, x_key, transport, rssi, now) {
-        Ok(o)  => o,
+        Ok(o) => o,
         Err(_) => return ERR_INTERNAL,
     };
 
     // SyncOffer contains Vec<Uuid>. Serialize the IDs as Vec<[u8; 16]> —
     // raw UUID bytes are more portable across language boundaries than strings.
-    let offer_bytes: Vec<[u8; 16]> = offer.bundle_ids
-        .iter()
-        .map(|id| *id.as_bytes())
-        .collect();
+    let offer_bytes: Vec<[u8; 16]> = offer.bundle_ids.iter().map(|id| *id.as_bytes()).collect();
 
     write_output(&offer_bytes, out_offer, out_offer_len)
 }
@@ -251,31 +244,31 @@ pub unsafe extern "C" fn mesh_peer_encountered(
 /// `out_actions` and `out_actions_len` must be valid writable pointers.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_bundle_received(
-    bundle_bytes:     *const u8,
-    bundle_len:       usize,
-    now:              i64,
-    out_actions:      *mut *mut u8,
-    out_actions_len:  *mut usize,
+    bundle_bytes: *const u8,
+    bundle_len: usize,
+    now: i64,
+    out_actions: *mut *mut u8,
+    out_actions_len: *mut usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     let bytes = unsafe { std::slice::from_raw_parts(bundle_bytes, bundle_len) };
 
     let bundle = match ripple_core::bundle::Bundle::from_bytes(bytes) {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return ERR_INTERNAL,
     };
 
     let mut router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
 
     let actions = match router.on_bundle_received(bundle, now) {
-        Ok(a)  => a,
+        Ok(a) => a,
         Err(_) => return ERR_INTERNAL,
     };
 
@@ -296,11 +289,11 @@ pub unsafe extern "C" fn mesh_bundle_received(
 #[no_mangle]
 pub unsafe extern "C" fn mesh_bundle_forwarded(
     bundle_id_bytes: *const u8,
-    bundle_id_len:   usize,
+    bundle_id_len: usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     if bundle_id_len != 16 {
@@ -309,18 +302,18 @@ pub unsafe extern "C" fn mesh_bundle_forwarded(
 
     let id_bytes = unsafe { std::slice::from_raw_parts(bundle_id_bytes, 16) };
     let id_arr: [u8; 16] = match id_bytes.try_into() {
-        Ok(a)  => a,
+        Ok(a) => a,
         Err(_) => return ERR_INTERNAL,
     };
     let bundle_id = Uuid::from_bytes(id_arr);
 
     let mut router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
 
     match router.on_bundle_forwarded(bundle_id) {
-        Ok(_)  => OK,
+        Ok(_) => OK,
         Err(_) => ERR_INTERNAL,
     }
 }
@@ -343,37 +336,34 @@ pub unsafe extern "C" fn mesh_bundle_forwarded(
 /// `out_bundles` and `out_bundles_len` must be valid writable pointers.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_bundles_for_peer(
-    x25519_pubkey:    *const u8,
-    out_bundles:      *mut *mut u8,
-    out_bundles_len:  *mut usize,
+    x25519_pubkey: *const u8,
+    out_bundles: *mut *mut u8,
+    out_bundles_len: *mut usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     let x_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(x25519_pubkey, 32).try_into() {
-            Ok(a)  => a,
+            Ok(a) => a,
             Err(_) => return ERR_INTERNAL,
         }
     };
 
     let router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
 
     let bundles = match router.store().bundles_for_peer(&x_key) {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return ERR_INTERNAL,
     };
 
     // Serialize each bundle to its wire bytes, then wrap the whole list.
-    let bundle_bytes: Vec<Vec<u8>> = bundles
-        .iter()
-        .filter_map(|b| b.to_bytes().ok())
-        .collect();
+    let bundle_bytes: Vec<Vec<u8>> = bundles.iter().filter_map(|b| b.to_bytes().ok()).collect();
 
     write_output(&bundle_bytes, out_bundles, out_bundles_len)
 }
@@ -409,19 +399,19 @@ pub unsafe extern "C" fn mesh_bundles_for_peer(
 /// function returns.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_create_bundle(
-    identity_bytes:   *const u8,
-    identity_len:     usize,
-    dest_pubkey:      *const u8, // NULL for Broadcast
-    payload:          *const u8,
-    payload_len:      usize,
-    priority:         u8,
-    now:              i64,
-    out_bundle:       *mut *mut u8,
-    out_bundle_len:   *mut usize,
+    identity_bytes: *const u8,
+    identity_len: usize,
+    dest_pubkey: *const u8, // NULL for Broadcast
+    payload: *const u8,
+    payload_len: usize,
+    priority: u8,
+    now: i64,
+    out_bundle: *mut *mut u8,
+    out_bundle_len: *mut usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     if identity_len != 32 {
@@ -430,7 +420,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
 
     let id_arr: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(identity_bytes, 32).try_into() {
-            Ok(a)  => a,
+            Ok(a) => a,
             Err(_) => return ERR_INTERNAL,
         }
     };
@@ -441,7 +431,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
     } else {
         let pk: [u8; 32] = unsafe {
             match std::slice::from_raw_parts(dest_pubkey, 32).try_into() {
-                Ok(a)  => a,
+                Ok(a) => a,
                 Err(_) => return ERR_INTERNAL,
             }
         };
@@ -461,13 +451,13 @@ pub unsafe extern "C" fn mesh_create_bundle(
         .payload(payload_slice.to_vec())
         .build(&identity, now)
     {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return ERR_INTERNAL,
     };
 
     // Store it so it gets forwarded when peers are encountered.
     let router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
     if router.store().insert_bundle(&bundle).is_err() {
@@ -475,7 +465,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
     }
 
     let bytes = match bundle.to_bytes() {
-        Ok(b)  => b,
+        Ok(b) => b,
         Err(_) => return ERR_SERIALIZE,
     };
 
@@ -499,22 +489,22 @@ pub unsafe extern "C" fn mesh_create_bundle(
 /// `out_actions` and `out_actions_len` must be valid writable pointers.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_tick(
-    now:              i64,
-    out_actions:      *mut *mut u8,
-    out_actions_len:  *mut usize,
+    now: i64,
+    out_actions: *mut *mut u8,
+    out_actions_len: *mut usize,
 ) -> i32 {
     let router_mutex = match ROUTER.get() {
         Some(m) => m,
-        None    => return ERR_NOT_INIT,
+        None => return ERR_NOT_INIT,
     };
 
     let mut router = match router_mutex.lock() {
-        Ok(r)  => r,
+        Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
 
     let actions = match router.mesh_tick(now) {
-        Ok(a)  => a,
+        Ok(a) => a,
         Err(_) => return ERR_INTERNAL,
     };
 
@@ -546,7 +536,8 @@ pub unsafe extern "C" fn mesh_free(ptr: *mut u8, len: usize) {
     }
     unsafe {
         // Reconstruct the slice Box from the raw pointer and let it drop.
-        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));}
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));
+    }
 }
 
 // ── Action serialization ──────────────────────────────────────────────────────
@@ -565,35 +556,35 @@ pub unsafe extern "C" fn mesh_free(ptr: *mut u8, len: usize) {
 enum SerializableAction {
     ForwardBundle {
         peer_pubkey: Vec<u8>,
-        bundle_id:   [u8; 16],
+        bundle_id: [u8; 16],
     },
     NotifyUser {
         bundle_id: [u8; 16],
     },
     UpdateSharedState {
-        key:   String,
+        key: String,
         value: Vec<u8>,
     },
 }
 
 fn actions_to_serializable(actions: &[Action]) -> Vec<SerializableAction> {
-    actions.iter().map(|a| match a {
-        Action::ForwardBundle { peer_pubkey, bundle_id } => {
-            SerializableAction::ForwardBundle {
+    actions
+        .iter()
+        .map(|a| match a {
+            Action::ForwardBundle {
+                peer_pubkey,
+                bundle_id,
+            } => SerializableAction::ForwardBundle {
                 peer_pubkey: peer_pubkey.to_vec(),
-                bundle_id:   *bundle_id.as_bytes(),
-            }
-        }
-        Action::NotifyUser { bundle_id } => {
-            SerializableAction::NotifyUser {
                 bundle_id: *bundle_id.as_bytes(),
-            }
-        }
-        Action::UpdateSharedState { key, value } => {
-            SerializableAction::UpdateSharedState {
-                key:   key.clone(),
+            },
+            Action::NotifyUser { bundle_id } => SerializableAction::NotifyUser {
+                bundle_id: *bundle_id.as_bytes(),
+            },
+            Action::UpdateSharedState { key, value } => SerializableAction::UpdateSharedState {
+                key: key.clone(),
                 value: value.clone(),
-            }
-        }
-    }).collect()
+            },
+        })
+        .collect()
 }

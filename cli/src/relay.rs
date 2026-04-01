@@ -6,6 +6,19 @@
 //!   - DELETE /bundle/:id after we've processed each received bundle
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum RelayError {
+    #[error("HTTP request failed: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("server rejected bundle: {0}")]
+    ServerError(reqwest::StatusCode),
+
+    #[error("failed to parse inbox response: {0}")]
+    Parse(String),
+}
 
 /// Submit a bundle to the rendezvous server.
 ///
@@ -19,21 +32,18 @@ pub async fn submit_bundle(
     client: &reqwest::Client,
     server_url: &str,
     bundle_bytes: Vec<u8>,
-) -> Result<(), String> {
-    let url = format!("{server_url}/bundle");
-
+) -> Result<(), RelayError> {
     let response = client
-        .post(&url)
+        .post(format!("{server_url}/bundle"))
         .body(bundle_bytes)
         .header("Content-Type", "application/octet-stream")
         .send()
-        .await
-        .map_err(|e| format!("HTTP error submitting bundle: {e}"))?;
+        .await?; // <-- reqwest::Error auto-converts via #[from]
 
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(format!("server returned {}", response.status()))
+        Err(RelayError::ServerError(response.status()))
     }
 }
 
@@ -45,34 +55,27 @@ pub async fn fetch_inbox(
     client: &reqwest::Client,
     server_url: &str,
     our_x25519_pubkey: &[u8; 32],
-) -> Result<Vec<Vec<u8>>, String> {
+) -> Result<Vec<Vec<u8>>, RelayError> {
     let pubkey_hex = hex::encode(our_x25519_pubkey);
-    let url = format!("{server_url}/inbox/{pubkey_hex}");
-
     let response = client
-        .get(&url)
+        .get(format!("{server_url}/inbox/{pubkey_hex}"))
         .send()
-        .await
-        .map_err(|e| format!("HTTP error fetching inbox: {e}"))?;
+        .await?;
 
     if !response.status().is_success() {
-        return Err(format!("server returned {}", response.status()));
+        return Err(RelayError::ServerError(response.status()));
     }
 
-    // The server returns `{ "bundles": ["base64...", "base64...", ...] }`.
     let body: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| format!("failed to parse inbox response: {e}"))?;
+        .map_err(|e| RelayError::Parse(e.to_string()))?;
 
     let bundles = body["bundles"]
         .as_array()
-        .ok_or("missing bundles field")?
+        .ok_or_else(|| RelayError::Parse("missing bundles field".into()))?
         .iter()
-        .filter_map(|v| {
-            let b64 = v.as_str()?;
-            B64.decode(b64).ok()
-        })
+        .filter_map(|v| B64.decode(v.as_str()?).ok())
         .collect();
 
     Ok(bundles)
@@ -83,13 +86,10 @@ pub async fn ack_bundle(
     client: &reqwest::Client,
     server_url: &str,
     bundle_id: uuid::Uuid,
-) -> Result<(), String> {
-    let url = format!("{server_url}/bundle/{bundle_id}");
+) -> Result<(), RelayError> {
     client
-        .delete(&url)
+        .delete(format!("{server_url}/bundle/{bundle_id}"))
         .send()
-        .await
-        .map_err(|e| format!("HTTP error acking bundle: {e}"))?;
+        .await?;
     Ok(())
 }
-

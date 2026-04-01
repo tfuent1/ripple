@@ -29,9 +29,9 @@ pub enum BundleError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Priority {
-    Normal = 0,  // Spray and Wait, N=6,  TTL=24h
-    Urgent = 1,  // Spray and Wait, N=20, TTL=12h
-    Sos    = 2,  // Epidemic routing,     TTL=never
+    Normal = 0, // Spray and Wait, N=6,  TTL=24h
+    Urgent = 1, // Spray and Wait, N=20, TTL=12h
+    Sos = 2,    // Epidemic routing,     TTL=never
 }
 
 impl Priority {
@@ -40,7 +40,7 @@ impl Priority {
         match self {
             Priority::Normal => Some(24 * 3600),
             Priority::Urgent => Some(12 * 3600),
-            Priority::Sos    => None,
+            Priority::Sos => None,
         }
     }
 
@@ -49,7 +49,7 @@ impl Priority {
         match self {
             Priority::Normal => Some(6),
             Priority::Urgent => Some(20),
-            Priority::Sos    => None,
+            Priority::Sos => None,
         }
     }
 }
@@ -72,17 +72,17 @@ pub enum Destination {
 /// Every message, map pin, status beacon, and SOS alert is a Bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
-    pub id:            Uuid,
-    pub origin:        [u8; 32],    // Ed25519 pubkey of the sender (identity, signing)
-    pub origin_x25519: [u8; 32],    // X25519 pubkey of the sender (encryption/DH)
-    pub destination:   Destination,
-    pub created_at:    i64,         // Unix timestamp seconds
-    pub expires_at:    Option<i64>, // None = never expires (SOS only)
-    pub hop_count:     u8,
-    pub hop_limit:     u8,
-    pub priority:      Priority,
-    pub payload:       Vec<u8>,     // encrypted for Peer, plaintext for Broadcast
-    pub signature:     Vec<u8>,     // Ed25519 over all fields except signature itself (64 bytes)
+    pub id: Uuid,
+    pub origin: [u8; 32], // Ed25519 pubkey of the sender (identity, signing)
+    pub origin_x25519: [u8; 32], // X25519 pubkey of the sender (encryption/DH)
+    pub destination: Destination,
+    pub created_at: i64,         // Unix timestamp seconds
+    pub expires_at: Option<i64>, // None = never expires (SOS only)
+    pub hop_count: u8,
+    pub hop_limit: u8,
+    pub priority: Priority,
+    pub payload: Vec<u8>,   // encrypted for Peer, plaintext for Broadcast
+    pub signature: Vec<u8>, // Ed25519 over all fields except signature itself (64 bytes)
 }
 
 impl Bundle {
@@ -120,6 +120,10 @@ impl Bundle {
     /// This is everything except `signature` itself.
     fn signable_bytes(&self) -> Result<Vec<u8>, BundleError> {
         // We serialize a tuple of the fields — order matters and must never change.
+        // NOTE -  hop_count is intentionally excluded. It is mutated by every relay
+        // node as the bundle transits the mesh, so including it would invalidate
+        // the signature on the first forward. The signature commits to the origin's
+        // intent (payload, destination, priority, TTL) — not the transport path.
         let signable = (
             &self.id,
             &self.origin,
@@ -127,7 +131,6 @@ impl Bundle {
             &self.destination,
             self.created_at,
             self.expires_at,
-            self.hop_count,
             self.hop_limit,
             &self.priority,
             &self.payload,
@@ -138,7 +141,10 @@ impl Bundle {
     /// Verify the bundle's signature against its origin public key.
     pub fn verify(&self) -> Result<(), BundleError> {
         let bytes = self.signable_bytes()?;
-        let sig_bytes: [u8; 64] = self.signature.as_slice().try_into()
+        let sig_bytes: [u8; 64] = self
+            .signature
+            .as_slice()
+            .try_into()
             .map_err(|_| BundleError::InvalidSignature)?;
         crypto::verify_signature(&self.origin, &bytes, &sig_bytes)
             .map_err(|_| BundleError::InvalidSignature)
@@ -150,9 +156,9 @@ impl Bundle {
 /// Fluent builder for creating and signing outbound bundles.
 pub struct BundleBuilder {
     destination: Destination,
-    priority:    Priority,
-    payload:     Vec<u8>,
-    hop_limit:   u8,
+    priority: Priority,
+    payload: Vec<u8>,
+    hop_limit: u8,
 }
 
 impl BundleBuilder {
@@ -193,17 +199,17 @@ impl BundleBuilder {
 
         // Build the bundle with a placeholder signature so we can serialize it.
         let mut bundle = Bundle {
-            id:          Uuid::new_v4(),
-            origin:      identity.public_key(),
+            id: Uuid::new_v4(),
+            origin: identity.public_key(),
             origin_x25519: identity.x25519_public_key(),
             destination: self.destination,
-            created_at:  now_secs,
+            created_at: now_secs,
             expires_at,
-            hop_count:   0,
-            hop_limit:   self.hop_limit,
-            priority:    self.priority,
+            hop_count: 0,
+            hop_limit: self.hop_limit,
+            priority: self.priority,
             payload,
-            signature:   vec![0u8; 64],
+            signature: vec![0u8; 64],
         };
 
         // Sign the signable fields and write the real signature in.
@@ -247,13 +253,11 @@ mod tests {
         let alice = Identity::generate();
         let bob = Identity::generate();
 
-        let bundle = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Urgent,
-        )
-        .payload(b"direct message".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let bundle =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Urgent)
+                .payload(b"direct message".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         bundle.verify().unwrap();
 
@@ -316,5 +320,20 @@ mod tests {
         assert!(bundle.increment_hop()); // 3 — at limit
         assert!(!bundle.increment_hop()); // refused
     }
-}
 
+    #[test]
+    fn test_relayed_bundle_still_verifies() {
+        let identity = Identity::generate();
+        let mut bundle = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"relay me".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        // Simulate two relay hops.
+        assert!(bundle.increment_hop());
+        assert!(bundle.increment_hop());
+
+        // Signature must still be valid after hop count changes.
+        bundle.verify().unwrap();
+    }
+}

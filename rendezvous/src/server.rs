@@ -80,16 +80,16 @@ impl RateLimiter {
 /// Fine-grained locking means they're independent.
 #[derive(Clone)]
 pub struct AppState {
-    pub db:           Arc<Mutex<Db>>,
-    rate_limiter:     Arc<Mutex<RateLimiter>>,
+    pub db: Arc<Mutex<Db>>,
+    rate_limiter: Arc<Mutex<RateLimiter>>,
     pub max_body_bytes: usize,
 }
 
 impl AppState {
     pub fn new(db: Db, max_body_bytes: usize) -> Self {
         Self {
-            db:            Arc::new(Mutex::new(db)),
-            rate_limiter:  Arc::new(Mutex::new(RateLimiter::default())),
+            db: Arc::new(Mutex::new(db)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::default())),
             max_body_bytes,
         }
     }
@@ -111,9 +111,9 @@ impl AppState {
 pub fn build_router(state: AppState) -> Router {
     let limit = state.max_body_bytes;
     Router::new()
-        .route("/bundle",        post(post_bundle))
+        .route("/bundle", post(post_bundle))
         .route("/inbox/:pubkey", get(get_inbox))
-        .route("/bundle/:id",    delete(delete_bundle))
+        .route("/bundle/:id", delete(delete_bundle))
         .layer(RequestBodyLimitLayer::new(limit))
         .with_state(state)
 }
@@ -145,7 +145,7 @@ async fn post_bundle(
 
     let db = state.db.lock().unwrap();
     match db.insert_bundle(&body) {
-        Ok(true)  => {
+        Ok(true) => {
             info!("stored bundle from {}", addr.ip());
             StatusCode::CREATED
         }
@@ -191,13 +191,10 @@ async fn get_inbox(
 // ── DELETE /bundle/:id ────────────────────────────────────────────────────────
 
 /// Acknowledge delivery — remove a bundle by UUID.
-async fn delete_bundle(
-    State(state): State<AppState>,
-    Path(bundle_id): Path<String>,
-) -> StatusCode {
+async fn delete_bundle(State(state): State<AppState>, Path(bundle_id): Path<String>) -> StatusCode {
     let db = state.db.lock().unwrap();
     match db.delete_bundle(&bundle_id) {
-        Ok(_)  => StatusCode::OK,
+        Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

@@ -49,7 +49,9 @@ pub fn load_or_create() -> Result<Identity, IdentityError> {
             return Err(IdentityError::InvalidKeyFile);
         }
 
-        let arr: [u8; 32] = bytes.try_into().map_err(|_| IdentityError::InvalidKeyFile)?;
+        let arr: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| IdentityError::InvalidKeyFile)?;
         Ok(Identity::from_bytes(&arr))
     } else {
         // Generate new identity and persist it.

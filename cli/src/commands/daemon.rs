@@ -48,18 +48,21 @@ pub async fn run(router: Router, identity: Identity, server_url: String, quiet: 
     let our_x25519 = identity.x25519_public_key();
 
     println!("Ed25519 : {}", hex::encode(identity.public_key()));
-    println!("X25519  : {} (share this — it's your inbox key)", hex::encode(our_x25519));
+    println!(
+        "X25519  : {} (share this — it's your inbox key)",
+        hex::encode(our_x25519)
+    );
     if !quiet {
         info!("rendezvous server: {server_url}");
     }
 
-    let router_tick    = Arc::clone(&router);
-    let router_relay   = Arc::clone(&router);
-    let identity_tick  = Arc::clone(&identity);
+    let router_tick = Arc::clone(&router);
+    let router_relay = Arc::clone(&router);
+    let identity_tick = Arc::clone(&identity);
     let identity_relay = Arc::clone(&identity);
-    let client         = reqwest::Client::new();
-    let client_relay   = client.clone();
-    let server_relay   = server_url.clone();
+    let client = reqwest::Client::new();
+    let client_relay = client.clone();
+    let server_relay = server_url.clone();
 
     // ── Tick task ─────────────────────────────────────────────────────────────
     //
@@ -81,7 +84,7 @@ pub async fn run(router: Router, identity: Identity, server_url: String, quiet: 
 
             match result {
                 Ok(actions) => handle_actions(actions, &router_tick, &identity_tick, quiet),
-                Err(e)      => error!("mesh_tick error: {e}"),
+                Err(e) => error!("mesh_tick error: {e}"),
             }
         }
     });
@@ -89,32 +92,52 @@ pub async fn run(router: Router, identity: Identity, server_url: String, quiet: 
     // ── Relay task ────────────────────────────────────────────────────────────
     let relay_task = tokio::spawn(async move {
         // Poll once immediately so we don't wait 30s on startup.
-        poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519, &identity_relay, quiet).await;
+        poll_and_relay(
+            &router_relay,
+            &client_relay,
+            &server_relay,
+            &our_x25519,
+            &identity_relay,
+            quiet,
+        )
+        .await;
 
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
-            poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519, &identity_relay, quiet).await;
+            poll_and_relay(
+                &router_relay,
+                &client_relay,
+                &server_relay,
+                &our_x25519,
+                &identity_relay,
+                quiet,
+            )
+            .await;
         }
     });
 
     // Drive both tasks concurrently. Neither returns, so this runs forever.
     // If one task panics, tokio::join! surfaces the error here.
     let (t, r) = tokio::join!(tick_task, relay_task);
-    if let Err(e) = t { error!("tick task panicked: {e}"); }
-    if let Err(e) = r { error!("relay task panicked: {e}"); }
+    if let Err(e) = t {
+        error!("tick task panicked: {e}");
+    }
+    if let Err(e) = r {
+        error!("relay task panicked: {e}");
+    }
 }
 
 // ── Combined poll + relay outbound ────────────────────────────────────────────
 
 /// One relay cycle: submit outbound bundles, then fetch and process inbound.
 async fn poll_and_relay(
-    router:     &Arc<Mutex<Router>>,
-    client:     &reqwest::Client,
+    router: &Arc<Mutex<Router>>,
+    client: &reqwest::Client,
     server_url: &str,
     our_x25519: &[u8; 32],
-    identity:   &Arc<Identity>,
-    quiet:      bool,
+    identity: &Arc<Identity>,
+    quiet: bool,
 ) {
     relay_outbound(router, client, server_url).await;
     fetch_inbound(router, client, server_url, our_x25519, identity, quiet).await;
@@ -126,11 +149,7 @@ async fn poll_and_relay(
 ///
 /// Phase 1: we submit everything. Phase 3 will filter by transport so we
 /// skip bundles already synced over BLE.
-async fn relay_outbound(
-    router:    &Arc<Mutex<Router>>,
-    client:    &reqwest::Client,
-    server_url: &str,
-) {
+async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, server_url: &str) {
     // Collect bundles while holding the lock, then release it before
     // doing any I/O. You must never hold a Mutex lock across an .await —
     // if the task is suspended while holding the lock, no other task can
@@ -158,18 +177,21 @@ async fn relay_outbound(
 
 /// Fetch bundles from our inbox, hand each to the Router, ack delivered ones.
 async fn fetch_inbound(
-    router:    &Arc<Mutex<Router>>,
-    client:    &reqwest::Client,
+    router: &Arc<Mutex<Router>>,
+    client: &reqwest::Client,
     server_url: &str,
     our_x25519: &[u8; 32],
-    identity:   &Arc<Identity>,
-    quiet:      bool,
+    identity: &Arc<Identity>,
+    quiet: bool,
 ) {
     info!("polling inbox...");
 
     let blobs = match relay::fetch_inbox(client, server_url, our_x25519).await {
-        Ok(b)  => b,
-        Err(e) => { warn!("inbox fetch failed: {e}"); return; }
+        Ok(b) => b,
+        Err(e) => {
+            warn!("inbox fetch failed: {e}");
+            return;
+        }
     };
 
     if blobs.is_empty() {
@@ -183,8 +205,11 @@ async fn fetch_inbound(
 
     for raw in &blobs {
         let bundle = match Bundle::from_bytes(raw) {
-            Ok(b)  => b,
-            Err(e) => { warn!("failed to deserialize bundle: {e}"); continue; }
+            Ok(b) => b,
+            Err(e) => {
+                warn!("failed to deserialize bundle: {e}");
+                continue;
+            }
         };
 
         let bundle_id = bundle.id;
@@ -219,10 +244,10 @@ async fn fetch_inbound(
 // ── Action handler ────────────────────────────────────────────────────────────
 
 fn handle_actions(
-    actions:  Vec<Action>,
-    router:   &Arc<Mutex<Router>>,
+    actions: Vec<Action>,
+    router: &Arc<Mutex<Router>>,
     identity: &Identity,
-    quiet:    bool,
+    quiet: bool,
 ) {
     for action in actions {
         match action {
@@ -249,18 +274,14 @@ fn handle_actions(
                         // bundle.origin_x25519 is the sender's X25519 pubkey —
                         // distinct from bundle.origin (Ed25519). The recipient
                         // uses it to mirror the DH the sender performed during
-                        // encrypt(). These are NOT interchangeable — see ADR-006.                        
+                        // encrypt(). These are NOT interchangeable — see ADR-006.
                         match crypto::decrypt(identity, &b.origin_x25519, &b.payload) {
                             Ok(plaintext) => {
                                 let text = String::from_utf8_lossy(&plaintext);
                                 // Always print messages regardless of --quiet.
                                 // This is the whole point of --quiet: silence
                                 // tracing noise but keep message output visible.
-                                println!(
-                                    "📨  from {} | {}",
-                                    hex::encode(&b.origin[..8]),
-                                    text
-                                );
+                                println!("📨  from {} | {}", hex::encode(&b.origin[..8]), text);
                                 // Mark displayed so `ripple status` unread count clears.
                                 let r = router.lock().unwrap();
                                 if let Err(e) = r.store().mark_displayed(bundle_id) {
@@ -277,7 +298,10 @@ fn handle_actions(
                     }
                 }
             }
-            Action::ForwardBundle { peer_pubkey, bundle_id } => {
+            Action::ForwardBundle {
+                peer_pubkey,
+                bundle_id,
+            } => {
                 if !quiet {
                     info!(
                         "queued forward of {} to peer {}",

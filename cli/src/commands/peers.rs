@@ -4,9 +4,7 @@ use ripple_core::routing::Router;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(router: &Router) -> anyhow::Result<()> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs() as i64;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     let since = now - 24 * 3600; // last 24 hours
     let encounters = router.store().recent_encounters(since)?;
@@ -18,7 +16,7 @@ pub fn run(router: &Router) -> anyhow::Result<()> {
 
     for enc in &encounters {
         println!(
-            "peer {} | transport {} | rssi {} | last seen {}s ago",
+            "peer {} | transport {:?} | rssi {} | last seen {}s ago",
             hex::encode(&enc.peer_pubkey[..8]), // first 8 bytes = readable prefix
             enc.transport,
             enc.rssi,

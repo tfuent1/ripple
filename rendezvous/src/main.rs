@@ -53,7 +53,7 @@ async fn main() {
         Some(p) => p,
         None => {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let dir  = format!("{home}/.ripple");
+            let dir = format!("{home}/.ripple");
             std::fs::create_dir_all(&dir).expect("failed to create ~/.ripple");
             format!("{dir}/rendezvous.db")
         }
@@ -62,7 +62,7 @@ async fn main() {
     info!("opening database at {db_path}");
     let db = Db::open(&db_path).expect("failed to open database");
 
-    let state  = AppState::new(db, args.max_bundle_kb * 1024);
+    let state = AppState::new(db, args.max_bundle_kb * 1024);
     let router = server::build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));

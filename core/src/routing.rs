@@ -32,20 +32,15 @@ pub enum Action {
         /// X25519 pubkey of the peer to forward to.
         /// Native uses this to look up the active transport session.
         peer_pubkey: [u8; 32],
-        bundle_id:   Uuid,
-    },
-
-    /// A bundle addressed to this node has arrived — notify the user.
-    NotifyUser {
         bundle_id: Uuid,
     },
 
+    /// A bundle addressed to this node has arrived — notify the user.
+    NotifyUser { bundle_id: Uuid },
+
     /// The CRDT shared state has been updated — native should sync its
     /// in-memory view. (Used in Phase 1.5 when crdt.rs is implemented.)
-    UpdateSharedState {
-        key:   String,
-        value: Vec<u8>,
-    },
+    UpdateSharedState { key: String, value: Vec<u8> },
 }
 
 // ── SyncOffer ─────────────────────────────────────────────────────────────────
@@ -65,8 +60,8 @@ pub struct SyncOffer {
 /// Native platforms call the three public methods and execute the returned
 /// Actions — the Router itself never touches a transport or UI.
 pub struct Router {
-    store:   Store,
-    peers:   PeerManager,
+    store: Store,
+    peers: PeerManager,
     /// Our own X25519 public key — used to detect bundles addressed to us.
     self_x25519_pubkey: [u8; 32],
 }
@@ -100,16 +95,23 @@ impl Router {
     pub fn on_peer_encountered(
         &mut self,
         peer_ed25519_pubkey: [u8; 32],
-        peer_x25519_pubkey:  [u8; 32],
-        transport:           Transport,
-        rssi:                i32,
-        now:                 i64,
+        peer_x25519_pubkey: [u8; 32],
+        transport: Transport,
+        rssi: i32,
+        now: i64,
     ) -> Result<SyncOffer, RouterError> {
         // Log the encounter in SQLite for PRoPHET scoring later (Phase 3).
-        self.store.log_encounter(&peer_x25519_pubkey, transport as u8, rssi, now)?;
+        self.store
+            .log_encounter(&peer_x25519_pubkey, transport as u8, rssi, now)?;
 
         // Update the in-memory peer table.
-        self.peers.update(peer_ed25519_pubkey, peer_x25519_pubkey, transport, rssi, now);
+        self.peers.update(
+            peer_ed25519_pubkey,
+            peer_x25519_pubkey,
+            transport,
+            rssi,
+            now,
+        );
 
         // Find all bundles queued for this specific peer.
         let queued = self.store.bundles_for_peer(&peer_x25519_pubkey)?;
@@ -156,16 +158,20 @@ impl Router {
     pub fn on_bundle_received(
         &mut self,
         bundle: Bundle,
-        now:    i64,
+        now: i64,
     ) -> Result<Vec<Action>, RouterError> {
-        // Reject expired bundles immediately — don't store or forward.
+        // Reject expired bundles immediately — cheapest check first.
         if bundle.is_expired(now) {
             return Ok(vec![]);
         }
 
+        // Reject bundles with invalid signatures — a peer may be sending
+        // forged or corrupt data. We verify before mutating anything.
+        if bundle.verify().is_err() {
+            return Ok(vec![]);
+        }
+
         // Reject bundles that have hit the hop limit.
-        // We clone here because increment_hop takes &mut self, and we want
-        // to check before committing to storage.
         let mut bundle = bundle;
         if !bundle.increment_hop() {
             return Ok(vec![]);
@@ -180,7 +186,9 @@ impl Router {
             Destination::Peer(dest_pubkey) => {
                 if dest_pubkey == &self.self_x25519_pubkey {
                     // This bundle is for us.
-                    actions.push(Action::NotifyUser { bundle_id: bundle.id });
+                    actions.push(Action::NotifyUser {
+                        bundle_id: bundle.id,
+                    });
                 }
                 // If it's not for us, it's stored and will be forwarded
                 // when the destination peer is encountered.
@@ -238,29 +246,29 @@ mod tests {
     #[test]
     fn test_sync_offer_for_queued_bundle() {
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
         let mut router = test_router(&alice);
 
         // Queue a bundle for Bob.
-        let bundle = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"hey bob".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let bundle =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+                .payload(b"hey bob".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         let bundle_id = bundle.id;
         router.store.insert_bundle(&bundle).unwrap();
 
         // Bob shows up.
-        let offer = router.on_peer_encountered(
-            bob.public_key(),
-            bob.x25519_public_key(),
-            Transport::Ble,
-            -65,
-            NOW,
-        ).unwrap();
+        let offer = router
+            .on_peer_encountered(
+                bob.public_key(),
+                bob.x25519_public_key(),
+                Transport::Ble,
+                -65,
+                NOW,
+            )
+            .unwrap();
 
         assert_eq!(offer.bundle_ids.len(), 1);
         assert_eq!(offer.bundle_ids[0], bundle_id);
@@ -269,17 +277,19 @@ mod tests {
     #[test]
     fn test_sync_offer_empty_for_unknown_peer() {
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
         let mut router = test_router(&alice);
 
         // No bundles queued for Bob.
-        let offer = router.on_peer_encountered(
-            bob.public_key(),
-            bob.x25519_public_key(),
-            Transport::Ble,
-            -65,
-            NOW,
-        ).unwrap();
+        let offer = router
+            .on_peer_encountered(
+                bob.public_key(),
+                bob.x25519_public_key(),
+                Transport::Ble,
+                -65,
+                NOW,
+            )
+            .unwrap();
 
         assert!(offer.bundle_ids.is_empty());
     }
@@ -289,16 +299,14 @@ mod tests {
     #[test]
     fn test_bundle_addressed_to_us_triggers_notify() {
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
         let mut router = test_router(&bob); // Bob is running this router
 
-        let bundle = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"for bob".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let bundle =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+                .payload(b"for bob".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         let bundle_id = bundle.id;
         let actions = router.on_bundle_received(bundle, NOW).unwrap();
@@ -309,19 +317,17 @@ mod tests {
 
     #[test]
     fn test_bundle_not_for_us_produces_no_notify() {
-        let alice   = Identity::generate();
-        let bob     = Identity::generate();
+        let alice = Identity::generate();
+        let bob = Identity::generate();
         let charlie = Identity::generate();
         let mut router = test_router(&charlie); // Charlie is relaying
 
         // Bundle is for Bob, not Charlie.
-        let bundle = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"for bob".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let bundle =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+                .payload(b"for bob".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         let actions = router.on_bundle_received(bundle, NOW).unwrap();
         assert!(actions.is_empty());
@@ -330,19 +336,41 @@ mod tests {
     #[test]
     fn test_expired_bundle_rejected() {
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
         let mut router = test_router(&alice);
 
-        let bundle = BundleBuilder::new(
-            Destination::Peer(bob.x25519_public_key()),
-            Priority::Normal,
-        )
-        .payload(b"stale".to_vec())
-        .build(&alice, NOW)
-        .unwrap();
+        let bundle =
+            BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+                .payload(b"stale".to_vec())
+                .build(&alice, NOW)
+                .unwrap();
 
         // Receive it far in the future — past the 24h TTL.
         let actions = router.on_bundle_received(bundle, NOW + 25 * 3600).unwrap();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_forged_bundle_rejected() {
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let mut router = test_router(&alice);
+
+        // Build a legitimate bundle from Bob to Alice.
+        let mut bundle = BundleBuilder::new(
+            Destination::Peer(alice.x25519_public_key()),
+            Priority::Normal,
+        )
+        .payload(b"legitimate".to_vec())
+        .build(&bob, NOW)
+        .unwrap();
+
+        // Eve tampers with the payload — signature is now invalid.
+        bundle.payload = b"tampered".to_vec();
+
+        let actions = router.on_bundle_received(bundle, NOW).unwrap();
+
+        // Should be silently dropped — no actions, nothing stored.
         assert!(actions.is_empty());
     }
 
@@ -372,7 +400,7 @@ mod tests {
     #[test]
     fn test_spray_decrement_on_forward() {
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
         let mut router = test_router(&alice);
 
         let bundle = BundleBuilder::new(

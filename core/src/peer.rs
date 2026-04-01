@@ -10,12 +10,12 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Transport {
-    Ble          = 0,
-    WifiDirect   = 1,
-    Multipeer    = 2,
-    WifiAdhoc    = 3,
-    Internet     = 4,
-    Lora         = 5,
+    Ble = 0,
+    WifiDirect = 1,
+    Multipeer = 2,
+    WifiAdhoc = 3,
+    Internet = 4,
+    Lora = 5,
 }
 
 impl Transport {
@@ -102,10 +102,10 @@ impl PeerManager {
     pub fn update(
         &mut self,
         ed25519_pubkey: [u8; 32],
-        x25519_pubkey:  [u8; 32],
-        transport:      Transport,
-        rssi:           i32,
-        now:            i64,
+        x25519_pubkey: [u8; 32],
+        transport: Transport,
+        rssi: i32,
+        now: i64,
     ) -> &Peer {
         let peer = self.peers.entry(ed25519_pubkey).or_insert_with(|| Peer {
             ed25519_pubkey,
@@ -116,9 +116,9 @@ impl PeerManager {
         });
         // Update mutable fields on existing peers too.
         peer.x25519_pubkey = x25519_pubkey;
-        peer.last_seen     = now;
-        peer.transport     = transport;
-        peer.rssi          = rssi;
+        peer.last_seen = now;
+        peer.transport = transport;
+        peer.rssi = rssi;
         peer
     }
 
@@ -173,7 +173,7 @@ mod tests {
         let identity = Identity::generate();
 
         let ed = identity.public_key();
-        let x  = identity.x25519_public_key();
+        let x = identity.x25519_public_key();
 
         manager.update(ed, x, Transport::Ble, -65, NOW);
 
@@ -190,7 +190,7 @@ mod tests {
         let identity = Identity::generate();
 
         let ed = identity.public_key();
-        let x  = identity.x25519_public_key();
+        let x = identity.x25519_public_key();
 
         manager.update(ed, x, Transport::Ble, -65, NOW);
         // Same peer, seen again on a different transport with better signal.
@@ -209,10 +209,22 @@ mod tests {
     fn test_peer_manager_multiple_peers() {
         let mut manager = PeerManager::new();
         let alice = Identity::generate();
-        let bob   = Identity::generate();
+        let bob = Identity::generate();
 
-        manager.update(alice.public_key(), alice.x25519_public_key(), Transport::Ble, -60, NOW);
-        manager.update(bob.public_key(),   bob.x25519_public_key(),   Transport::Ble, -70, NOW);
+        manager.update(
+            alice.public_key(),
+            alice.x25519_public_key(),
+            Transport::Ble,
+            -60,
+            NOW,
+        );
+        manager.update(
+            bob.public_key(),
+            bob.x25519_public_key(),
+            Transport::Ble,
+            -70,
+            NOW,
+        );
 
         assert_eq!(manager.peers.len(), 2);
         assert!(manager.get(&alice.public_key()).is_some());
