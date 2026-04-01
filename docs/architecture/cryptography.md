@@ -78,7 +78,7 @@ ChaCha20-Poly1305 authenticated encryption.
 
 **Encrypt (sender side):**
 1. Derive shared secret: sender X25519 secret × recipient X25519 public key
-2. Use shared secret as ChaCha20-Poly1305 symmetric key
+2. Derive symmetric key: HKDF-SHA256(shared_secret, info="ripple-v1-message")
 3. Generate random 12-byte nonce
 4. Encrypt plaintext → ciphertext + 16-byte authentication tag
 5. Output: `nonce (12 bytes) || ciphertext+tag`
@@ -87,7 +87,8 @@ ChaCha20-Poly1305 authenticated encryption.
 1. Split input into nonce (first 12 bytes) and ciphertext
 2. Derive shared secret: recipient X25519 secret × sender X25519 public key
    (taken from `bundle.origin_x25519` — NOT `bundle.origin`)
-3. Decrypt and verify authentication tag
+3. Derive symmetric key: HKDF-SHA256(shared_secret, info="ripple-v1-message")
+4. Decrypt and verify authentication tag
 
 The shared secret is symmetric — both sides independently compute the same value
 from their own private key and the other party's public key. No key exchange
@@ -100,6 +101,8 @@ round-trip is required.
 | `ed25519-dalek` | 2.1 | Ed25519 signing and verification |
 | `x25519-dalek` | 2.0 | X25519 Diffie-Hellman key exchange |
 | `chacha20poly1305` | 0.10 | Authenticated symmetric encryption |
+| `hkdf` | 0.12 | Key derivation from raw DH output (RFC 5869) |
+| `sha2` | 0.10 | SHA-256 hash function, used as HKDF PRF |
 | `zeroize` | 1.7 | Secure memory zeroing on drop |
 | `rand` | 0.8 | Nonce and keypair generation |
 
@@ -116,8 +119,9 @@ pub enum CryptoError {
 
 ## Future Considerations
 
-- Bundle payload encryption currently uses raw X25519 DH output as the
-  ChaCha20-Poly1305 key. A KDF (HKDF) over the shared secret would be
-  more robust and is a candidate hardening step before Phase 2.
+- The HKDF info label `"ripple-v1-message"` is intentionally versioned.
+  If the key derivation scheme ever changes, bump the label to
+  `"ripple-v2-message"` to ensure keys derived under different schemes
+  never collide. See ADR-007.
 - Namespace shared-key encryption (Phase 3) will add a separate symmetric
   encryption path for broadcast bundles within private namespaces.

@@ -112,6 +112,8 @@ bundles and peer encounter history.
   returns count
 - `Store::log_encounter(peer_pubkey: &[u8; 32], transport: u8, rssi: i32, now: i64)`
 - `Store::recent_encounters(since: i64) -> Result<Vec<Encounter>, StoreError>`
+- `Store::decrement_spray(id: Uuid) -> Result<Option<u8>, StoreError>`
+- Schema versioning via `PRAGMA user_version` — forward-compatible migrations
 - Unit tests using an in-memory SQLite DB (`:memory:` path)
 
 ---
@@ -286,7 +288,7 @@ tests/
 
 Phase 1 is complete when:
 
-1. `cargo test` passes with zero failures and zero warnings
+1. `cargo test` passes with zero failures and zero warnings (54 tests, 95.4% coverage)
 2. `cargo clippy -- -D warnings` passes clean
 3. Two `ripple daemon` instances can exchange an encrypted direct message
    through the rendezvous server

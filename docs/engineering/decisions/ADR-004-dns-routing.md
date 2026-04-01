@@ -71,12 +71,12 @@ struct Bundle {
     origin_x25519: [u8; 32],      // X25519 pubkey of the sender (DH decryption)
     destination:   Destination,   // Peer(pubkey) | Broadcast | ContentHash
     created_at:    i64,
-    expires_at:    Option<i64>,   // None = never expires (SOS only)
-    hop_count:     u8,
+    expires_at:    Option,   // None = never expires (SOS only)
+    hop_count:     u8,            // NOT covered by signature — mutated in transit
     hop_limit:     u8,
     priority:      Priority,      // Normal | Urgent | Sos
-    payload:       Vec<u8>,       // encrypted if addressed, plaintext if broadcast
-    signature:     Vec<u8>,       // Ed25519 over all fields except signature (64 bytes)
+    payload:       Vec,       // encrypted if addressed, plaintext if broadcast
+    signature:     Vec,       // Ed25519 over all fields except signature and hop_count
 }
 ```
 

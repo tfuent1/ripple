@@ -42,6 +42,7 @@ concurrent read performance as the CLI and routing layer mature.
 | `expires_at` | INTEGER | Unix timestamp seconds, NULL for SOS |
 | `delivered` | INTEGER | 0 = pending, 1 = delivered |
 | `displayed` | INTEGER | 0 = not yet shown to user, 1 = printed to terminal |
+| `spray_remaining` | INTEGER | Spray and Wait copy count; NULL for SOS epidemic bundles |
 | `raw` | BLOB | Full MessagePack-serialized bundle |
 
 Indexes: `dest_pubkey` (partial, non-null only) for `bundles_for_peer` queries;
@@ -83,6 +84,18 @@ a bundle. Stops the bundle from being resubmitted to the rendezvous server.
 **`mark_displayed(id)`** — sets `displayed = 1`. Called after the daemon
 successfully decrypts and prints a direct message to the terminal. Once
 displayed, the bundle no longer appears in `unread_count`.
+
+**`decrement_spray(id)`** — decrements `spray_remaining` by 1 and returns
+the new value. Called by `Router::on_bundle_forwarded` after a successful
+transfer. When `spray_remaining` reaches 0 the bundle transitions to the
+Waiting phase. SOS bundles have `spray_remaining = NULL` and are never
+decremented.
+
+**`Schema versioning`** — the database uses SQLite's built-in `user_version`
+PRAGMA for migration tracking. `migrate()` checks `PRAGMA user_version` on
+startup and runs only the migrations the database still needs. Currently at
+version 1. Adding a new migration means adding an `if version < N` block —
+never modifying existing blocks.
 
 **`unread_count()`** — returns the count of peer bundles where `delivered = 1`
 and `displayed = 0`. Broadcast bundles are excluded — only direct messages

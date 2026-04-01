@@ -10,10 +10,10 @@ encrypted before reaching the server.
 ### `POST /bundle`
 Accept a raw MessagePack bundle and store it.
 
-The server deserializes using `Bundle::from_bytes` to extract the
-destination pubkey and TTL. Everything else is stored as opaque bytes.
-Returns `201 Created` on success, `400 Bad Request` if the bundle can't
-be parsed.
+Returns `201 Created` on success, `400 Bad Request` if the body cannot
+be parsed as a valid MessagePack bundle, `413 Payload Too Large` if the
+body exceeds the configured size limit, `429 Too Many Requests` if the
+source IP has exceeded the rate limit.
 
 ### `GET /inbox/:pubkey_hex`
 Return all pending bundles for a destination pubkey.
@@ -57,9 +57,13 @@ bundles on every relay cycle; duplicates are silently dropped.
 
 ## Known Gaps
 
-- No authentication — any client can submit bundles for any destination.
+- **Bundle signature verification** — the server validates that bundles are
+  well-formed MessagePack but does not verify the Ed25519 signature. A client
+  can submit bundles with forged origin fields. Signature verification at the
+  HTTP boundary is a tracked hardening item for Milestone 1.8 / Phase 4.
+- **No authentication** — any client can submit bundles for any destination.
   Addressed in Phase 4 (Milestone 4.3).
-- Rate limiting is in-memory — resets on restart, not shared across
+- **Rate limiting is in-memory** — resets on restart, not shared across
   multiple server instances. Sufficient for Phase 1.
 
 ## Deployment

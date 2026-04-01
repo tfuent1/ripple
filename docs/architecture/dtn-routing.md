@@ -32,9 +32,10 @@ has queued for this peer. Native uses the offer to coordinate which bundles to
 transfer during the sync session.
 
 **`on_bundle_received(bundle, now)`**
-Called when a bundle arrives from a peer. Validates the bundle (expiry, hop limit),
-increments the hop count, persists it, and returns a list of `Action`s. Returns
-`NotifyUser` if the bundle is addressed to this node.
+Called when a bundle arrives from a peer. Validates the bundle (signature, expiry,
+hop limit), increments the hop count, persists it, and returns a list of `Action`s.
+Returns `NotifyUser` if the bundle is addressed to this node. Bundles that fail
+signature verification are silently dropped — no error is returned to the caller.
 
 **`on_bundle_forwarded(bundle_id)`**
 Called by native after successfully transferring a bundle to a peer. Decrements
@@ -141,5 +142,5 @@ pub struct SyncOffer {
   addition — the current implementation is DTN store-and-forward only.
 `- The `UpdateSharedState` action is defined but not yet emitted — it will be
   wired into `on_bundle_received` when bundles carrying CRDT payloads are
-  introduced in a later milestone.``
+  introduced in a later milestone.
 
