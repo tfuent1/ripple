@@ -19,4 +19,8 @@ uuid      = { workspace = true }
 tracing   = { workspace = true }
 tracing-subscriber = { workspace = true }
 hex       = { workspace = true }
+base64           = { workspace = true }
+tower-http       = { workspace = true }
+clap             = { workspace = true }
+thiserror        = { workspace = true }
 ripple-core  = { path = "../core" }

@@ -5,6 +5,8 @@
 //!   - GET /inbox/:our_x25519_pubkey_hex every 30 seconds
 //!   - DELETE /bundle/:id after we've processed each received bundle
 
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+
 /// Submit a bundle to the rendezvous server.
 ///
 /// `bundle_bytes` is the raw MessagePack bundle (from `bundle.to_bytes()`).
@@ -69,7 +71,7 @@ pub async fn fetch_inbox(
         .iter()
         .filter_map(|v| {
             let b64 = v.as_str()?;
-            base64_decode(b64).ok()
+            B64.decode(b64).ok()
         })
         .collect();
 
@@ -91,32 +93,3 @@ pub async fn ack_bundle(
     Ok(())
 }
 
-// ── base64 decode helper ──────────────────────────────────────────────────────
-
-/// Minimal base64 decode (no external dep needed for milestone 1.7).
-fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
-    let input = input.trim_end_matches('=').as_bytes();
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-
-    fn val(c: u8) -> Option<u8> {
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        ALPHABET.iter().position(|&a| a == c).map(|i| i as u8)
-    }
-
-    let mut i = 0;
-    while i + 1 < input.len() {
-        let b0 = val(input[i]).ok_or(())?;
-        let b1 = val(input[i + 1]).ok_or(())?;
-        out.push((b0 << 2) | (b1 >> 4));
-        if i + 2 < input.len() {
-            let b2 = val(input[i + 2]).ok_or(())?;
-            out.push(((b1 & 0xf) << 4) | (b2 >> 2));
-            if i + 3 < input.len() {
-                let b3 = val(input[i + 3]).ok_or(())?;
-                out.push(((b2 & 0x3) << 6) | b3);
-            }
-        }
-        i += 4;
-    }
-    Ok(out)
-}
