@@ -72,16 +72,17 @@ pub enum Destination {
 /// Every message, map pin, status beacon, and SOS alert is a Bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
-    pub id:          Uuid,
-    pub origin:      [u8; 32],    // Ed25519 pubkey of the sender
-    pub destination: Destination,
-    pub created_at:  i64,         // Unix timestamp seconds
-    pub expires_at:  Option<i64>, // None = never expires (SOS only)
-    pub hop_count:   u8,
-    pub hop_limit:   u8,
-    pub priority:    Priority,
-    pub payload:     Vec<u8>,     // encrypted for Peer, plaintext for Broadcast
-    pub signature:   Vec<u8>,    // Ed25519 over all fields except signature itself (64 bytes)
+    pub id:            Uuid,
+    pub origin:        [u8; 32],    // Ed25519 pubkey of the sender (identity, signing)
+    pub origin_x25519: [u8; 32],    // X25519 pubkey of the sender (encryption/DH)
+    pub destination:   Destination,
+    pub created_at:    i64,         // Unix timestamp seconds
+    pub expires_at:    Option<i64>, // None = never expires (SOS only)
+    pub hop_count:     u8,
+    pub hop_limit:     u8,
+    pub priority:      Priority,
+    pub payload:       Vec<u8>,     // encrypted for Peer, plaintext for Broadcast
+    pub signature:     Vec<u8>,     // Ed25519 over all fields except signature itself (64 bytes)
 }
 
 impl Bundle {
@@ -122,6 +123,7 @@ impl Bundle {
         let signable = (
             &self.id,
             &self.origin,
+            &self.origin_x25519,
             &self.destination,
             self.created_at,
             self.expires_at,
@@ -193,6 +195,7 @@ impl BundleBuilder {
         let mut bundle = Bundle {
             id:          Uuid::new_v4(),
             origin:      identity.public_key(),
+            origin_x25519: identity.x25519_public_key(),
             destination: self.destination,
             created_at:  now_secs,
             expires_at,

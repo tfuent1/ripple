@@ -35,6 +35,10 @@ enum Command {
         /// Rendezvous server URL.
         #[arg(long, default_value = "http://localhost:8080")]
         server: String,
+
+        /// Suppress tracing log output. Message lines are always shown.
+        #[arg(long, default_value_t = false)]
+        quiet: bool,
     },
 
     /// Queue a bundle for sending.
@@ -55,8 +59,6 @@ enum Command {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
-
     let cli = Cli::parse();
 
     // All commands need an identity and a store/router.
@@ -71,13 +73,16 @@ fn main() -> anyhow::Result<()> {
     let router = Router::new(store, identity.x25519_public_key());
 
     match cli.command {
-        Command::Daemon { server } => {
+        Command::Daemon { server, quiet } => {
+            if !quiet {
+                tracing_subscriber::fmt::init();
+            }
             // The daemon is async — we need to start the tokio runtime.
             // `tokio::runtime::Runtime::new()` is the manual equivalent of
             // `#[tokio::main]` — we use the manual form here because `main()`
             // itself isn't async (it returns `anyhow::Result<()>`).
             tokio::runtime::Runtime::new()?
-                .block_on(commands::daemon::run(router, identity, server));
+                .block_on(commands::daemon::run(router, identity, server, quiet));
         }
 
         Command::Send { to, message } => {

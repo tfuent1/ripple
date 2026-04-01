@@ -63,13 +63,16 @@ impl Store {
             CREATE TABLE IF NOT EXISTS bundles (
                 id               TEXT    PRIMARY KEY,
                 destination      TEXT    NOT NULL,
-                dest_pubkey      BLOB,           -- X25519 pubkey for Peer bundles, NULL for Broadcast
+                dest_pubkey      BLOB,
                 priority         INTEGER NOT NULL,
-                expires_at       INTEGER,        -- NULL for SOS bundles
+                expires_at       INTEGER,
                 delivered        INTEGER NOT NULL DEFAULT 0,
-                spray_remaining  INTEGER,        -- NULL for SOS (epidemic), 0 = Waiting phase
-                raw              BLOB    NOT NULL -- full MessagePack serialized bundle
+                displayed        INTEGER NOT NULL DEFAULT 0,  -- 1 after message is printed to user
+                spray_remaining  INTEGER,
+                raw              BLOB    NOT NULL
             );
+            -- NOTE: migrate() uses CREATE TABLE IF NOT EXISTS, so this column only
+            -- appears in new databases. Delete ~/.ripple/mesh.db to pick it up.
 
             CREATE INDEX IF NOT EXISTS idx_bundles_dest_pubkey
                 ON bundles (dest_pubkey) WHERE dest_pubkey IS NOT NULL;
@@ -212,6 +215,35 @@ impl Store {
             params![id.to_string()],
         )?;
         Ok(())
+    }
+
+    /// Mark a bundle as displayed (printed to the user).
+    /// `unread_count` will no longer include this bundle.
+    pub fn mark_displayed(&self, id: Uuid) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE bundles SET displayed = 1 WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Count peer bundles that have been delivered (acked) but not yet
+    /// displayed to the user. Used by `ripple status`.
+    ///
+    /// Only counts `destination = 'peer'` rows — broadcast bundles are
+    /// not personal messages and don't count as unread.
+    ///
+    /// **Rust note:** `query_row` is used here instead of `query_map`
+    /// because we expect exactly one row back (a COUNT). The closure
+    /// receives that single row and extracts column 0 as a u32.
+    pub fn unread_count(&self) -> Result<u32, StoreError> {
+        let count = self.conn.query_row(
+            "SELECT COUNT(*) FROM bundles
+             WHERE delivered = 1 AND displayed = 0 AND destination = 'peer'",
+            [],
+            |row| row.get::<_, u32>(0),
+        )?;
+        Ok(count)
     }
 
     /// Delete all bundles whose `expires_at` is in the past.
@@ -521,6 +553,64 @@ mod tests {
         let remaining = store.decrement_spray(id).unwrap();
         assert_eq!(remaining, Some(4));
     }
+
+        #[test]
+    fn test_mark_displayed_and_unread_count() {
+        let store = test_store();
+        let alice = Identity::generate();
+        let bob   = Identity::generate();
+
+        // Create a peer bundle (direct message) and a broadcast.
+        let dm = BundleBuilder::new(
+            Destination::Peer(bob.x25519_public_key()),
+            Priority::Normal,
+        )
+        .payload(b"hello bob".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
+
+        let broadcast = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"everyone".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
+
+        store.insert_bundle(&dm).unwrap();
+        store.insert_bundle(&broadcast).unwrap();
+
+        // Neither is delivered yet — unread count is 0.
+        assert_eq!(store.unread_count().unwrap(), 0);
+
+        // Deliver both (simulates relay ack).
+        store.mark_delivered(dm.id).unwrap();
+        store.mark_delivered(broadcast.id).unwrap();
+
+        // The peer bundle is now unread; broadcast doesn't count.
+        assert_eq!(store.unread_count().unwrap(), 1);
+
+        // Display the message.
+        store.mark_displayed(dm.id).unwrap();
+
+        // Back to zero.
+        assert_eq!(store.unread_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_unread_count_ignores_broadcasts() {
+        let store = test_store();
+        let identity = Identity::generate();
+
+        let b = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"shout".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        store.insert_bundle(&b).unwrap();
+        store.mark_delivered(b.id).unwrap();
+
+        // Delivered broadcast should NOT appear as unread.
+        assert_eq!(store.unread_count().unwrap(), 0);
+    }
+
     #[test]
     fn test_all_undelivered() {
         let store = test_store();

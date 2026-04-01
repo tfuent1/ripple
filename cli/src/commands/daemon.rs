@@ -11,7 +11,7 @@
 
 use crate::relay;
 use ripple_core::bundle::Bundle;
-use ripple_core::crypto::Identity;
+use ripple_core::crypto::{self, Identity};
 use ripple_core::routing::{Action, Router};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -28,7 +28,7 @@ use tracing::{error, info, warn};
 /// **Async note:** This function is `async` because it uses `.await` inside.
 /// The caller (`main.rs`) drives it with `Runtime::block_on(...)`, which
 /// runs it to completion on the current thread.
-pub async fn run(router: Router, identity: Identity, server_url: String) {
+pub async fn run(router: Router, identity: Identity, server_url: String, quiet: bool) {
     // Wrap Router in Arc<Mutex<...>> so both tasks can share it.
     //
     // Arc  = "Atomic Reference Count" — shared ownership across tasks.
@@ -39,23 +39,27 @@ pub async fn run(router: Router, identity: Identity, server_url: String) {
     // not a copy of the data itself. Cheap to clone, safe to share.
     let router = Arc::new(Mutex::new(router));
 
+    // Identity is read-only after startup — no mutation needed, so no Mutex.
+    // But tokio::spawn requires everything it captures to be 'static (i.e.
+    // owned, not borrowed). Wrapping in Arc gives each task an owned handle
+    // to the same Identity without copying the keypair bytes.
+    let identity = Arc::new(identity);
+
     let our_x25519 = identity.x25519_public_key();
 
-    info!(
-        "daemon started | Ed25519: {}",
-        hex::encode(identity.public_key())
-    );
-    info!(
-        "inbox key (X25519, share this): {}",
-        hex::encode(our_x25519)
-    );
-    info!("rendezvous server: {server_url}");
+    println!("Ed25519 : {}", hex::encode(identity.public_key()));
+    println!("X25519  : {} (share this — it's your inbox key)", hex::encode(our_x25519));
+    if !quiet {
+        info!("rendezvous server: {server_url}");
+    }
 
-    let router_tick  = Arc::clone(&router);
-    let router_relay = Arc::clone(&router);
-    let client       = reqwest::Client::new();
-    let client_relay = client.clone();
-    let server_relay = server_url.clone();
+    let router_tick    = Arc::clone(&router);
+    let router_relay   = Arc::clone(&router);
+    let identity_tick  = Arc::clone(&identity);
+    let identity_relay = Arc::clone(&identity);
+    let client         = reqwest::Client::new();
+    let client_relay   = client.clone();
+    let server_relay   = server_url.clone();
 
     // ── Tick task ─────────────────────────────────────────────────────────────
     //
@@ -66,25 +70,17 @@ pub async fn run(router: Router, identity: Identity, server_url: String) {
     let tick_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
-            // Suspend this task until the next 30-second tick.
-            // While suspended, tokio runs the relay task (and anything else).
-            // This is the key difference from `std::thread::sleep` — no thread
-            // is blocked; the thread is free to do other work.
             interval.tick().await;
 
             let now = unix_now();
 
-            // Lock, work, unlock — the braces control the lock's lifetime.
-            // When `r` goes out of scope at `}`, the MutexGuard is dropped,
-            // which releases the lock. If we held the lock across an `.await`,
-            // the relay task could never acquire it.
             let result = {
                 let mut r = router_tick.lock().unwrap();
                 r.mesh_tick(now)
             };
 
             match result {
-                Ok(actions) => handle_actions(actions),
+                Ok(actions) => handle_actions(actions, &router_tick, &identity_tick, quiet),
                 Err(e)      => error!("mesh_tick error: {e}"),
             }
         }
@@ -93,12 +89,12 @@ pub async fn run(router: Router, identity: Identity, server_url: String) {
     // ── Relay task ────────────────────────────────────────────────────────────
     let relay_task = tokio::spawn(async move {
         // Poll once immediately so we don't wait 30s on startup.
-        poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519).await;
+        poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519, &identity_relay, quiet).await;
 
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
-            poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519).await;
+            poll_and_relay(&router_relay, &client_relay, &server_relay, &our_x25519, &identity_relay, quiet).await;
         }
     });
 
@@ -113,13 +109,15 @@ pub async fn run(router: Router, identity: Identity, server_url: String) {
 
 /// One relay cycle: submit outbound bundles, then fetch and process inbound.
 async fn poll_and_relay(
-    router:    &Arc<Mutex<Router>>,
-    client:    &reqwest::Client,
+    router:     &Arc<Mutex<Router>>,
+    client:     &reqwest::Client,
     server_url: &str,
     our_x25519: &[u8; 32],
+    identity:   &Arc<Identity>,
+    quiet:      bool,
 ) {
     relay_outbound(router, client, server_url).await;
-    fetch_inbound(router, client, server_url, our_x25519).await;
+    fetch_inbound(router, client, server_url, our_x25519, identity, quiet).await;
 }
 
 // ── Relay outbound ────────────────────────────────────────────────────────────
@@ -164,6 +162,8 @@ async fn fetch_inbound(
     client:    &reqwest::Client,
     server_url: &str,
     our_x25519: &[u8; 32],
+    identity:   &Arc<Identity>,
+    quiet:      bool,
 ) {
     info!("polling inbox...");
 
@@ -198,7 +198,7 @@ async fn fetch_inbound(
 
         match actions {
             Ok(actions) => {
-                handle_actions(actions);
+                handle_actions(actions, router, identity, quiet);
                 // Mark delivered locally so we don't process it again.
                 {
                     let r = router.lock().unwrap();
@@ -218,24 +218,78 @@ async fn fetch_inbound(
 
 // ── Action handler ────────────────────────────────────────────────────────────
 
-fn handle_actions(actions: Vec<Action>) {
+fn handle_actions(
+    actions:  Vec<Action>,
+    router:   &Arc<Mutex<Router>>,
+    identity: &Identity,
+    quiet:    bool,
+) {
     for action in actions {
         match action {
             Action::NotifyUser { bundle_id } => {
-                // Phase 1: print to stdout. Phase 2: desktop notification.
-                println!("📨  new message arrived (bundle {bundle_id})");
+                // Fetch the bundle from the store so we can decrypt its payload.
+                //
+                // Lock scope: we acquire the lock, do the synchronous store
+                // lookup, then immediately release it by letting `r` drop at
+                // the closing `}`. This keeps the lock held for the minimum
+                // time necessary — no lock is held during the decrypt or print.
+                let bundle = {
+                    let r = router.lock().unwrap();
+                    r.store().get_bundle(bundle_id)
+                };
+
+                match bundle {
+                    Err(e) => {
+                        warn!("could not fetch bundle {bundle_id} for display: {e}");
+                    }
+                    Ok(None) => {
+                        warn!("bundle {bundle_id} not found in store (already expired?)");
+                    }
+                    Ok(Some(b)) => {
+                        // bundle.origin_x25519 is the sender's X25519 pubkey —
+                        // distinct from bundle.origin (Ed25519). The recipient
+                        // uses it to mirror the DH the sender performed during
+                        // encrypt(). These are NOT interchangeable — see ADR-006.                        
+                        match crypto::decrypt(identity, &b.origin_x25519, &b.payload) {
+                            Ok(plaintext) => {
+                                let text = String::from_utf8_lossy(&plaintext);
+                                // Always print messages regardless of --quiet.
+                                // This is the whole point of --quiet: silence
+                                // tracing noise but keep message output visible.
+                                println!(
+                                    "📨  from {} | {}",
+                                    hex::encode(&b.origin[..8]),
+                                    text
+                                );
+                                // Mark displayed so `ripple status` unread count clears.
+                                let r = router.lock().unwrap();
+                                if let Err(e) = r.store().mark_displayed(bundle_id) {
+                                    warn!("mark_displayed failed for {bundle_id}: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                // Decryption failure is unusual but not fatal.
+                                // Could mean the bundle was addressed to a different
+                                // X25519 key than ours, or data is corrupt.
+                                warn!("decryption failed for bundle {bundle_id}: {e}");
+                            }
+                        }
+                    }
+                }
             }
             Action::ForwardBundle { peer_pubkey, bundle_id } => {
-                // Internet forwarding happens automatically via relay_outbound.
-                // BLE/WiFi Direct forwarding is Phase 2.
-                info!(
-                    "queued forward of {} to peer {}",
-                    bundle_id,
-                    hex::encode(&peer_pubkey[..8])
-                );
+                if !quiet {
+                    info!(
+                        "queued forward of {} to peer {}",
+                        bundle_id,
+                        hex::encode(&peer_pubkey[..8])
+                    );
+                }
             }
             Action::UpdateSharedState { key, value: _ } => {
-                info!("shared state update: {key}");
+                if !quiet {
+                    info!("shared state update: {key}");
+                }
             }
         }
     }
