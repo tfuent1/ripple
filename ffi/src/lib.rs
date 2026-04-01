@@ -25,7 +25,6 @@ use ripple_core::crypto::Identity;
 use ripple_core::peer::Transport;
 use ripple_core::routing::{Action, Router, SyncOffer};
 use ripple_core::store::Store;
-use rmp_serde;
 use serde::Serialize;
 use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
@@ -108,8 +107,12 @@ fn write_output<T: Serialize>(
 ///
 /// Returns OK on success, ERR_INTERNAL if the store can't be opened,
 /// or ERR_NOT_INIT if called a second time (OnceLock only sets once).
+///
+/// # Safety
+/// `db_path` must be a valid pointer to `db_path_len` bytes of UTF-8 data.
+/// `identity_bytes` must be a valid pointer to `identity_len` bytes, or NULL.
 #[no_mangle]
-pub extern "C" fn mesh_init(
+pub unsafe extern "C" fn mesh_init(
     db_path:        *const u8,
     db_path_len:    usize,
     identity_bytes: *const u8,
@@ -168,8 +171,12 @@ pub extern "C" fn mesh_init(
 /// `out_offer_len`  — written with byte length of the above
 ///
 /// Caller must call `mesh_free(out_offer, out_offer_len)` when done.
+/// 
+/// # Safety
+/// `ed25519_pubkey` and `x25519_pubkey` must each be valid pointers to 32 bytes.
+/// `out_offer` and `out_offer_len` must be valid writable pointers.
 #[no_mangle]
-pub extern "C" fn mesh_peer_encountered(
+pub unsafe extern "C" fn mesh_peer_encountered(
     ed25519_pubkey:  *const u8,
     x25519_pubkey:   *const u8,
     transport:       u8,
@@ -238,8 +245,12 @@ pub extern "C" fn mesh_peer_encountered(
 /// `out_actions_len`
 ///
 /// Caller must call `mesh_free` on `out_actions` when done.
+///
+/// # Safety
+/// `bundle_bytes` must be a valid pointer to `bundle_len` bytes.
+/// `out_actions` and `out_actions_len` must be valid writable pointers.
 #[no_mangle]
-pub extern "C" fn mesh_bundle_received(
+pub unsafe extern "C" fn mesh_bundle_received(
     bundle_bytes:     *const u8,
     bundle_len:       usize,
     now:              i64,
@@ -279,8 +290,11 @@ pub extern "C" fn mesh_bundle_received(
 ///
 /// `bundle_id_bytes` — 16 raw bytes of the bundle's UUID
 /// `bundle_id_len`   — must be 16
+///
+/// # Safety
+/// `bundle_id_bytes` must be a valid pointer to exactly 16 bytes.
 #[no_mangle]
-pub extern "C" fn mesh_bundle_forwarded(
+pub unsafe extern "C" fn mesh_bundle_forwarded(
     bundle_id_bytes: *const u8,
     bundle_id_len:   usize,
 ) -> i32 {
@@ -323,8 +337,12 @@ pub extern "C" fn mesh_bundle_forwarded(
 /// `out_bundles_len`
 ///
 /// Caller must call `mesh_free` when done.
+///
+/// # Safety
+/// `x25519_pubkey` must be a valid pointer to 32 bytes.
+/// `out_bundles` and `out_bundles_len` must be valid writable pointers.
 #[no_mangle]
-pub extern "C" fn mesh_bundles_for_peer(
+pub unsafe extern "C" fn mesh_bundles_for_peer(
     x25519_pubkey:    *const u8,
     out_bundles:      *mut *mut u8,
     out_bundles_len:  *mut usize,
@@ -374,6 +392,12 @@ pub extern "C" fn mesh_bundles_for_peer(
 ///
 /// Caller must call `mesh_free` when done.
 ///
+/// # Safety
+/// `identity_bytes` must be a valid pointer to 32 bytes.
+/// `dest_pubkey` must be a valid pointer to 32 bytes, or NULL for Broadcast.
+/// `payload` must be a valid pointer to `payload_len` bytes.
+/// `out_bundle` and `out_bundle_len` must be valid writable pointers.
+///
 /// **Note:** This function needs the Identity to sign the bundle, but the
 /// Identity is not stored in the Router (the private key must not live in
 /// a Mutex accessible to arbitrary FFI callers in a real deployment).
@@ -384,7 +408,7 @@ pub extern "C" fn mesh_bundles_for_peer(
 /// CLI can call it. The private key is zeroed from the stack when the
 /// function returns.
 #[no_mangle]
-pub extern "C" fn mesh_create_bundle(
+pub unsafe extern "C" fn mesh_create_bundle(
     identity_bytes:   *const u8,
     identity_len:     usize,
     dest_pubkey:      *const u8, // NULL for Broadcast
@@ -470,8 +494,11 @@ pub extern "C" fn mesh_create_bundle(
 /// `out_actions_len`
 ///
 /// Caller must call `mesh_free` when done.
+///
+/// # Safety
+/// `out_actions` and `out_actions_len` must be valid writable pointers.
 #[no_mangle]
-pub extern "C" fn mesh_tick(
+pub unsafe extern "C" fn mesh_tick(
     now:              i64,
     out_actions:      *mut *mut u8,
     out_actions_len:  *mut usize,
@@ -503,20 +530,23 @@ pub extern "C" fn mesh_tick(
 /// function in this library. Passing a pointer not allocated here, or calling
 /// this twice on the same pointer, is undefined behavior.
 ///
+/// # Safety
+/// `ptr` must have been allocated by this library via a prior FFI call.
+/// Must be called exactly once per allocated buffer. Passing NULL is safe.
+///
 /// **Rust note:** `Box::from_raw` is the mirror of `Box::into_raw`. It
 /// reconstructs the Box from the raw pointer, taking ownership back. When
 /// this Box goes out of scope at the end of the function, it is dropped —
 /// which frees the heap memory. This is the correct, safe way to implement
 /// a `free` in Rust FFI.
 #[no_mangle]
-pub extern "C" fn mesh_free(ptr: *mut u8, len: usize) {
+pub unsafe extern "C" fn mesh_free(ptr: *mut u8, len: usize) {
     if ptr.is_null() {
         return;
     }
     unsafe {
         // Reconstruct the slice Box from the raw pointer and let it drop.
-        let _ = Box::from_raw(std::slice::from_raw_parts_mut(ptr, len));
-    }
+        let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len));}
 }
 
 // ── Action serialization ──────────────────────────────────────────────────────

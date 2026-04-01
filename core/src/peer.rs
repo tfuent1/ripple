@@ -102,10 +102,10 @@ impl PeerManager {
     pub fn update(
         &mut self,
         ed25519_pubkey: [u8; 32],
-        x25519_pubkey: [u8; 32],
-        transport: Transport,
-        rssi: i32,
-        now: i64,
+        x25519_pubkey:  [u8; 32],
+        transport:      Transport,
+        rssi:           i32,
+        now:            i64,
     ) -> &Peer {
         let peer = self.peers.entry(ed25519_pubkey).or_insert_with(|| Peer {
             ed25519_pubkey,
@@ -114,13 +114,11 @@ impl PeerManager {
             transport,
             rssi,
         });
-
         // Update mutable fields on existing peers too.
         peer.x25519_pubkey = x25519_pubkey;
         peer.last_seen     = now;
         peer.transport     = transport;
         peer.rssi          = rssi;
-
         peer
     }
 
@@ -132,6 +130,12 @@ impl PeerManager {
     /// All currently known peers.
     pub fn all(&self) -> impl Iterator<Item = &Peer> {
         self.peers.values()
+    }
+}
+
+impl Default for PeerManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

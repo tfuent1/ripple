@@ -215,6 +215,12 @@ impl ORSet {
     }
 }
 
+impl Default for ORSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── SharedState ───────────────────────────────────────────────────────────────
 
 /// Top-level CRDT state container.
@@ -267,15 +273,14 @@ impl SharedState {
 
     /// Get or create a named ORSet, returning a mutable reference.
     ///
-    /// **Rust note:** `.entry(...).or_insert_with(...)` is the idiomatic pattern
+    /// **Rust note:** `.entry(...).or_default(...)` is the idiomatic pattern
     /// for "give me the value at this key, inserting a default if absent." We've
     /// seen this before in PeerManager — same pattern, different type.
     pub fn get_or_create_set(&mut self, key: impl Into<String>) -> &mut ORSet {
         self.sets
             .entry(key.into())
-            .or_insert_with(ORSet::new)
+            .or_default()
     }
-
     /// Read access to a named set.
     pub fn get_set(&self, key: &str) -> Option<&ORSet> {
         self.sets.get(key)
@@ -332,6 +337,12 @@ impl SharedState {
     /// Deserialize from MessagePack bytes received in a Bundle payload.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CrdtError> {
         Ok(rmp_serde::from_slice(bytes)?)
+    }
+}
+
+impl Default for SharedState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
