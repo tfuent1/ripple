@@ -267,3 +267,7 @@ written before the error was detected.
   identity-holding layer or pass the key on each call consistently.
 - A `mesh_decrypt_bundle` function will be needed in Phase 2 when the
   native layer needs to display received direct messages to the user.
+  The CLI handles this directly via `crypto::decrypt` without going through
+  FFI — this gap only applies to iOS and Android.
+- All `pub unsafe extern "C"` functions now carry `# Safety` doc sections
+  documenting pointer validity requirements for callers.

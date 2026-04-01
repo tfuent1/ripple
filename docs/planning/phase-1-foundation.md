@@ -31,8 +31,8 @@ messages — with all cryptographic guarantees intact.
 - [x] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
 - [x] Rendezvous server survives restart without losing stored bundles
 - [x] Received direct messages display decrypted plaintext in the daemon
-- [ ] All core modules have unit tests with >80% coverage
-- [ ] `cargo test` passes clean with no warnings
+- [x] All core modules have unit tests with >80% coverage
+- [x] `cargo test` passes clean with no warnings
 
 ## Out of Scope
 
