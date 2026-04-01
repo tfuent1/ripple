@@ -71,6 +71,11 @@ to determine what to send them.
 SOS bundles are excluded by the `IS NOT NULL` guard. Returns the count of
 deleted bundles. Called by `mesh_tick` in `routing.rs`.
 
+**`all_undelivered`** — returns all bundles with `delivered = 0` regardless
+of destination. Used by the CLI relay loop to submit outbound bundles to the
+rendezvous server. A Phase 1 simplification — Phase 3 will add transport-aware
+filtering so bundles already within BLE range are not redundantly relayed.
+
 **`log_encounter` / `recent_encounters`** — encounter history is the input
 to PRoPHET routing (Milestone 1.4+). The `since` parameter on
 `recent_encounters` allows the routing layer to look back a configurable

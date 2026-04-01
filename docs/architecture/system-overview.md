@@ -76,9 +76,11 @@ graph LR
     Workspace --> core[ripple-core<br/>lib crate]
     Workspace --> ffi[ripple-ffi<br/>staticlib + cdylib]
     Workspace --> cli[ripple-cli<br/>bin crate]
+    Workspace --> rendezvous[ripple-rendezvous<br/>bin crate]
 
     ffi -->|depends on| core
     cli -->|depends on| core
+    rendezvous -->|depends on| core
 
     core --> bundle[bundle.rs]
     core --> crypto[crypto.rs]

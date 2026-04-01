@@ -25,10 +25,10 @@ messages — with all cryptographic guarantees intact.
 - [x] Bundle TTL expiry via `mesh_tick`
 - [x] LWW-CRDT for shared state (map pins, resource posts)
 - [x] FFI surface compiles cleanly for both staticlib and cdylib targets
-- [ ] CLI daemon starts, generates or loads identity, prints public key
-- [ ] CLI daemon connects to rendezvous server and submits a bundle
-- [ ] CLI daemon polls rendezvous server inbox and receives a bundle
-- [ ] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
+- [x] CLI daemon starts, generates or loads identity, prints public key
+- [x] CLI daemon connects to rendezvous server and submits a bundle
+- [x] CLI daemon polls rendezvous server inbox and receives a bundle
+- [x] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
 - [ ] All core modules have unit tests with >80% coverage
 - [ ] `cargo test` passes clean with no warnings
 
