@@ -29,7 +29,7 @@ messages — with all cryptographic guarantees intact.
 - [x] CLI daemon connects to rendezvous server and submits a bundle
 - [x] CLI daemon polls rendezvous server inbox and receives a bundle
 - [x] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
-- [ ] Rendezvous server survives restart without losing stored bundles
+- [x] Rendezvous server survives restart without losing stored bundles
 - [ ] Received direct messages display decrypted plaintext in the daemon
 - [ ] All core modules have unit tests with >80% coverage
 - [ ] `cargo test` passes clean with no warnings

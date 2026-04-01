@@ -43,20 +43,32 @@ is null) are never deleted by the server.
 resubmitting the same bundle is safe. The daemon submits all undelivered
 bundles on every relay cycle; duplicates are silently dropped.
 
-## Phase 1 Limitations
+## Hardening (Milestone 1.8)
 
-The current server is a Phase 1 stub. Known gaps to address in
-Milestone 1.8:
+- **Persistent SQLite** — bundles survive server restarts. DB path
+  configurable via `--db`, default `~/.ripple/rendezvous.db`.
+- **Bundle size limit** — requests over the configured max (default 64 KB)
+  are rejected with `413 Payload Too Large` before the handler runs.
+- **Per-IP rate limiting** — max 60 bundle submissions per IP per minute.
+  Excess requests receive `429 Too Many Requests`.
+- **Graceful shutdown** — SIGINT and SIGTERM drain in-flight requests
+  before exit.
+- **`base64` crate** — hand-rolled encoder/decoder replaced throughout.
 
-- In-memory SQLite — all bundles lost on restart
-- No rate limiting
-- No bundle size limits
-- No authentication
-- Base64 implementation is hand-rolled (replace with `base64` crate)
+## Known Gaps
+
+- No authentication — any client can submit bundles for any destination.
+  Addressed in Phase 4 (Milestone 4.3).
+- Rate limiting is in-memory — resets on restart, not shared across
+  multiple server instances. Sufficient for Phase 1.
 
 ## Deployment
 ```bash
-cargo run -p ripple-rendezvous          # default: 0.0.0.0:8080
-```
+# Run directly
+cargo run -p ripple-rendezvous                         # defaults: port 8080, ~/.ripple/rendezvous.db
+cargo run -p ripple-rendezvous -- --port 9090 --db /data/relay.db
 
-Docker support and persistent storage are Milestone 1.8 deliverables.
+# Docker (persistent volume)
+docker build -f rendezvous/Dockerfile -t ripple-rendezvous .
+docker run -p 8080:8080 -v ripple-data:/home/ripple/.ripple ripple-rendezvous
+```
