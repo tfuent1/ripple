@@ -175,6 +175,35 @@ impl Store {
         Ok(bundles)
     }
 
+        /// Return all bundles not yet delivered, regardless of destination.
+    ///
+    /// Used by the CLI relay loop to submit outbound bundles to the
+    /// rendezvous server. In Phase 1 we relay everything; Phase 3 will
+    /// add transport-aware filtering so we skip bundles already within
+    /// BLE range.
+    ///
+    /// **Rust note:** `[]` as the params argument means "no bind parameters".
+    /// `query_map` with no params is just a full-table scan — same pattern
+    /// as `bundles_for_peer` but without the WHERE clause.
+    pub fn all_undelivered(&self) -> Result<Vec<Bundle>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT raw FROM bundles WHERE delivered = 0"
+        )?;
+
+        let bundles = stmt
+            .query_map([], |row| {
+                let raw: Vec<u8> = row.get(0)?;
+                Ok(raw)
+            })?
+            .map(|raw_result| {
+                let raw = raw_result.map_err(StoreError::Db)?;
+                Bundle::from_bytes(&raw).map_err(StoreError::Bundle)
+            })
+            .collect::<Result<Vec<Bundle>, StoreError>>()?;
+
+        Ok(bundles)
+    }
+
     /// Mark a bundle as delivered so it is no longer returned by queries.
     /// We keep the row rather than deleting it so expiry logic stays simple.
     pub fn mark_delivered(&self, id: Uuid) -> Result<(), StoreError> {
@@ -491,5 +520,31 @@ mod tests {
 
         let remaining = store.decrement_spray(id).unwrap();
         assert_eq!(remaining, Some(4));
+    }
+    #[test]
+    fn test_all_undelivered() {
+        let store = test_store();
+        let alice = Identity::generate();
+        let bob   = Identity::generate();
+
+        let b1 = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"one".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
+        let b2 = BundleBuilder::new(
+            Destination::Peer(bob.x25519_public_key()),
+            Priority::Normal,
+        )
+        .payload(b"two".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
+
+        store.insert_bundle(&b1).unwrap();
+        store.insert_bundle(&b2).unwrap();
+        store.mark_delivered(b1.id).unwrap();
+
+        let pending = store.all_undelivered().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, b2.id);
     }
 }

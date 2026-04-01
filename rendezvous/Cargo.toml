@@ -1,0 +1,22 @@
+[package]
+name = "ripple-rendezvous"
+description = "Ripple rendezvous/relay server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rendezvous"
+path = "src/main.rs"
+
+[dependencies]
+axum      = { workspace = true }
+tokio     = { workspace = true }
+rusqlite  = { workspace = true }
+rmp-serde = { workspace = true }
+serde     = { workspace = true }
+uuid      = { workspace = true }
+tracing   = { workspace = true }
+tracing-subscriber = { workspace = true }
+hex       = { workspace = true }
+ripple-core  = { path = "../core" }

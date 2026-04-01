@@ -3,6 +3,7 @@ members = [
     "core",
     "ffi",
     "cli",
+    "rendezvous",
 ]
 resolver = "2"
 
@@ -14,6 +15,7 @@ repository = "https://github.com/tfuent1/ripple"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1.0"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 rmp-serde = "1.1"
@@ -23,4 +25,12 @@ x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
 rand = "0.8"
 zeroize = { version = "1.7", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+axum = "0.7"
+hex = "0.4"
+anyhow = "1.0"
 
