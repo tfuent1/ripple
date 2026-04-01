@@ -29,6 +29,8 @@ messages — with all cryptographic guarantees intact.
 - [x] CLI daemon connects to rendezvous server and submits a bundle
 - [x] CLI daemon polls rendezvous server inbox and receives a bundle
 - [x] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
+- [ ] Rendezvous server survives restart without losing stored bundles
+- [ ] Received direct messages display decrypted plaintext in the daemon
 - [ ] All core modules have unit tests with >80% coverage
 - [ ] `cargo test` passes clean with no warnings
 
@@ -211,27 +213,35 @@ tracing-subscriber = "0.3"
 
 ---
 
-### Milestone 1.8 — Rendezvous Server
+### Milestone 1.8 — Rendezvous Server Hardening
 
-Implement a minimal rendezvous server. This is separate from the main workspace
-— a standalone `axum` service deployable to any VPS or homelab VM.
+Harden the Phase 1 rendezvous stub into a server that survives restarts
+and is safe to expose to the network.
 
 **Deliverables:**
-- `POST /bundle` — accepts a signed bundle, stores it by destination pubkey,
-  respects TTL
-- `GET /inbox/:pubkey` — returns all pending bundles for a pubkey
-- `DELETE /bundle/:id` — acknowledges delivery, removes bundle
-- Automatic expiry of bundles past their TTL
-- No message content visibility — server stores opaque encrypted bytes
-- Deployable via Docker
+- Persistent SQLite DB file (configurable path, default `~/.ripple/rendezvous.db`)
+- Bundle size limit — reject bundles over a configurable max (default 64KB)
+- Rate limiting — max bundle submissions per source IP per minute
+- Replace hand-rolled base64 with the `base64` crate
+- `--port` and `--db` CLI flags
+- Graceful shutdown — drain in-flight requests before exit
+- Docker image with persistent volume mount for the DB file
 
-**Crates to add:**
-```toml
-axum = "0.7"
-tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-tracing = "0.1"
-tracing-subscriber = "0.3"
+---
+
+### Milestone 1.9 — Message Display
+
+Decrypt and display received direct message content in the daemon. Currently
+`NotifyUser` prints the bundle ID but not the message text. This milestone
+makes the end-to-end loop human-readable.
+
+**Deliverables:**
+- Decrypt bundle payload using `crypto::decrypt` when `NotifyUser` is received
+- Print sender's Ed25519 pubkey (from `bundle.origin`) and plaintext to stdout
+- Handle decryption failure gracefully — log a warning, don't crash
+- `ripple status` shows count of unread (delivered but not yet displayed) bundles
+- Add `--quiet` flag to daemon to suppress non-message log output for clean
+  terminal use
 ```
 
 ---
