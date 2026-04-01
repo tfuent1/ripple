@@ -66,16 +66,17 @@ frequency, average bundle delivery latency, and hop count distributions.
 Bundle format:
 ```rust
 struct Bundle {
-    id:          Uuid,
-    origin:      [u8; 32],      // Ed25519 public key
-    destination: Destination,   // Peer(pubkey) | Broadcast | ContentHash
-    created_at:  i64,
-    expires_at:  i64,
-    hop_count:   u8,
-    hop_limit:   u8,
-    priority:    u8,
-    payload:     Vec<u8>,       // encrypted if addressed, plaintext if broadcast
-    signature:   [u8; 64],      // Ed25519 signature over all other fields
+    id:            Uuid,
+    origin:        [u8; 32],      // Ed25519 pubkey of the sender (signing, identity)
+    origin_x25519: [u8; 32],      // X25519 pubkey of the sender (DH decryption)
+    destination:   Destination,   // Peer(pubkey) | Broadcast | ContentHash
+    created_at:    i64,
+    expires_at:    Option<i64>,   // None = never expires (SOS only)
+    hop_count:     u8,
+    hop_limit:     u8,
+    priority:      Priority,      // Normal | Urgent | Sos
+    payload:       Vec<u8>,       // encrypted if addressed, plaintext if broadcast
+    signature:     Vec<u8>,       // Ed25519 over all fields except signature (64 bytes)
 }
 ```
 

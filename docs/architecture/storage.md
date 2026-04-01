@@ -41,6 +41,7 @@ concurrent read performance as the CLI and routing layer mature.
 | `priority` | INTEGER | 0 = Normal, 1 = Urgent, 2 = SOS |
 | `expires_at` | INTEGER | Unix timestamp seconds, NULL for SOS |
 | `delivered` | INTEGER | 0 = pending, 1 = delivered |
+| `displayed` | INTEGER | 0 = not yet shown to user, 1 = printed to terminal |
 | `raw` | BLOB | Full MessagePack-serialized bundle |
 
 Indexes: `dest_pubkey` (partial, non-null only) for `bundles_for_peer` queries;
@@ -75,6 +76,17 @@ deleted bundles. Called by `mesh_tick` in `routing.rs`.
 of destination. Used by the CLI relay loop to submit outbound bundles to the
 rendezvous server. A Phase 1 simplification — Phase 3 will add transport-aware
 filtering so bundles already within BLE range are not redundantly relayed.
+
+**`mark_delivered(id)`** — sets `delivered = 1`. Called after the relay acks
+a bundle. Stops the bundle from being resubmitted to the rendezvous server.
+
+**`mark_displayed(id)`** — sets `displayed = 1`. Called after the daemon
+successfully decrypts and prints a direct message to the terminal. Once
+displayed, the bundle no longer appears in `unread_count`.
+
+**`unread_count()`** — returns the count of peer bundles where `delivered = 1`
+and `displayed = 0`. Broadcast bundles are excluded — only direct messages
+addressed to this node count as unread. Used by `ripple status`.
 
 **`log_encounter` / `recent_encounters`** — encounter history is the input
 to PRoPHET routing (Milestone 1.4+). The `since` parameter on

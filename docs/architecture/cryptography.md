@@ -42,10 +42,18 @@ pub struct Identity {
 | Key | Type | Advertised | Used for |
 |---|---|---|---|
 | `public_key()` | Ed25519 | Yes | Bundle signature verification, mesh identity, `bundle.origin` |
-| `x25519_public_key()` | X25519 | Yes | Encrypting direct messages, `Destination::Peer(...)`, `dest_pubkey` column |
+| `x25519_public_key()` | X25519 | Yes | Encrypting direct messages, `Destination::Peer(...)`, `dest_pubkey` column, `bundle.origin_x25519` |
 
 **Never pass an Ed25519 key where an X25519 key is expected, or vice versa.**
 The types are both `[u8; 32]` — the compiler cannot catch this mistake. See ADR-006.
+
+**`bundle.origin` and `bundle.origin_x25519` are not interchangeable.**
+Both are `[u8; 32]` and both belong to the sender, but they are different encodings
+of the same underlying Curve25519 point (Edwards form vs Montgomery form). `origin`
+is used for signature verification. `origin_x25519` is used as the sender's DH
+public key during decryption. Passing `origin` where `origin_x25519` is expected
+produces a wrong shared secret and silent decryption failure — no compile error.
+This is the bug that was discovered during Milestone 1.9 smoke testing.
 
 ## Signing and Verification
 
@@ -78,6 +86,7 @@ ChaCha20-Poly1305 authenticated encryption.
 **Decrypt (recipient side):**
 1. Split input into nonce (first 12 bytes) and ciphertext
 2. Derive shared secret: recipient X25519 secret × sender X25519 public key
+   (taken from `bundle.origin_x25519` — NOT `bundle.origin`)
 3. Decrypt and verify authentication tag
 
 The shared secret is symmetric — both sides independently compute the same value

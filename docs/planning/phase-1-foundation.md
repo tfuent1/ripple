@@ -30,7 +30,7 @@ messages — with all cryptographic guarantees intact.
 - [x] CLI daemon polls rendezvous server inbox and receives a bundle
 - [x] Two CLI nodes can exchange a signed, encrypted direct message end-to-end
 - [x] Rendezvous server survives restart without losing stored bundles
-- [ ] Received direct messages display decrypted plaintext in the daemon
+- [x] Received direct messages display decrypted plaintext in the daemon
 - [ ] All core modules have unit tests with >80% coverage
 - [ ] `cargo test` passes clean with no warnings
 
@@ -229,24 +229,32 @@ and is safe to expose to the network.
 
 ---
 
-### Milestone 1.9 — Message Display
+``### Milestone 1.9 — Message Display
 
-Decrypt and display received direct message content in the daemon. Currently
-`NotifyUser` prints the bundle ID but not the message text. This milestone
-makes the end-to-end loop human-readable.
+Decrypt and display received direct message content in the daemon.
 
 **Deliverables:**
-- Decrypt bundle payload using `crypto::decrypt` when `NotifyUser` is received
-- Print sender's Ed25519 pubkey (from `bundle.origin`) and plaintext to stdout
-- Handle decryption failure gracefully — log a warning, don't crash
-- `ripple status` shows count of unread (delivered but not yet displayed) bundles
-- Add `--quiet` flag to daemon to suppress non-message log output for clean
-  terminal use
-```
+- `bundle.origin_x25519: [u8; 32]` added to `Bundle` — carries the sender's
+  X25519 pubkey so recipients can perform correct DH during decryption.
+  Ed25519 and X25519 pubkey bytes are not interchangeable (different curve
+  encodings) — passing `bundle.origin` to `crypto::decrypt` produces a wrong
+  shared secret and silent decryption failure. Discovered during smoke testing.
+- `displayed` column added to `bundles` table; `mark_displayed()` and
+  `unread_count()` added to `Store`
+- On `NotifyUser` — daemon fetches bundle, decrypts payload using
+  `crypto::decrypt` with node's own identity and `bundle.origin_x25519`,
+  prints sender pubkey prefix and plaintext to stdout, calls `mark_displayed`
+- Decryption failure logs a warning and continues — does not crash
+- `ripple status` shows unread count (peer bundles delivered but not displayed)
+- `--quiet` flag on `ripple daemon` suppresses tracing output; message lines
+  and startup pubkey lines always print via `println!`
+- `Identity` wrapped in `Arc` in daemon so both async tasks share it without
+  borrowing across await points
+- Tracing init moved from top of `main()` into the `Daemon` arm only`
 
 ---
 
-## Testing Strategy
+### Testing Strategy
 
 Phase 1 establishes the testing foundation for the entire project.
 
