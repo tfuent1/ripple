@@ -98,6 +98,8 @@ impl Bundle {
     }
 
     /// Increment hop count when forwarding. Returns false if hop limit reached.
+    /// The caller must not forward the bundle if this returns false.
+    #[must_use = "false means the hop limit was exceeded — do not forward this bundle"]
     pub fn increment_hop(&mut self) -> bool {
         if self.hop_count >= self.hop_limit {
             return false;
