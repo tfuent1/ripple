@@ -1,0 +1,245 @@
+# cargo-deny configuration for Ripple
+# Run:  cargo deny check
+# Docs: https://embarkstudios.github.io/cargo-deny/
+#
+# NOTE: This config uses the current cargo-deny API (post-v0.14 / "version 2"
+# schema). Several fields from older configs have been removed:
+#   [advisories] vulnerability, unsound, notice, severity-threshold — removed.
+#     All vulnerability and unsound advisories now unconditionally emit errors.
+#     Use the `ignore` field to suppress specific advisories you've reviewed.
+#   [licenses] copyleft, deny, unlicensed, allow-osi-fsf-free, default — removed.
+#     All licenses are now denied unless explicitly listed in `allow`.
+#     This is strictly safer — copyleft protection is now the default behavior.
+
+# ---------------------------------------------------------------------------
+# [graph] — controls which crates are included in the dependency graph that
+# all checks run against. Listing targets here limits checks to only the
+# platforms you actually build for, avoiding false positives from
+# platform-specific deps you'll never compile.
+# ---------------------------------------------------------------------------
+[graph]
+targets = [
+    # Primary development and CI target.
+    "x86_64-unknown-linux-gnu",
+    # Phase 2 mobile targets — checked now so license/CVE issues surface
+    # before we invest in the mobile build pipeline.
+    "aarch64-apple-ios",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+    # macOS for developer machines and the future Tauri desktop app (Phase 3).
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
+# all-features = false — default. We pass --all-features explicitly in CI
+# via the workflow step, so this doesn't need to be true here.
+all-features = false
+no-default-features = false
+
+# ---------------------------------------------------------------------------
+# [output] — controls diagnostic output verbosity.
+# ---------------------------------------------------------------------------
+[output]
+# feature-depth controls how deep feature edges are shown in inclusion graphs
+# when a check fails. 1 is usually enough to understand where a problematic
+# crate came from without being overwhelming.
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# [advisories] — checks crates against the RustSec advisory database.
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+#
+# This replaces cargo-audit — same RustSec advisory database, more
+# configurable. All vulnerability and unsound advisories unconditionally
+# fail the build; there is no longer a lint-level field for them.
+# To suppress a specific advisory you've reviewed, add it to `ignore`.
+# ---------------------------------------------------------------------------
+[advisories]
+# db-path and db-urls use sensible defaults (RustSec advisory DB) — no
+# need to override unless you're running in an air-gapped environment.
+
+# yanked = "deny" fails the build if any dependency version has been yanked
+# from crates.io. Yanked versions are almost always yanked for a reason
+# (security issue, critical bug, accidental publish).
+yanked = "deny"
+
+# unmaintained: which unmaintained advisories cause a failure.
+# "workspace" = only fail for direct workspace dependencies; transitive
+# unmaintained deps we don't control are reported as warnings only.
+# Options: "all" | "workspace" | "transitive" | "none"
+# Promote to "all" before any public release.
+unmaintained = "workspace"
+
+# unsound: which unsound advisories cause a failure.
+# "workspace" = same logic as unmaintained above.
+# Options: "all" | "workspace" | "transitive" | "none"
+unsound = "workspace"
+
+# unused-ignored-advisory = "warn" — if you add an advisory ID to `ignore`
+# but it's no longer in the dependency graph, emit a warning rather than
+# silently keeping a stale ignore entry.
+unused-ignored-advisory = "warn"
+
+# ignore — explicitly suppressed advisories. Only add an entry here after
+# consciously reviewing the advisory and accepting the risk. Always include
+# a reason so future maintainers know the decision was intentional.
+ignore = [
+    # Example:
+    # { id = "RUSTSEC-0000-0000", reason = "only affects the foo feature which we don't enable" },
+]
+
+# ---------------------------------------------------------------------------
+# [licenses] — verifies every crate in the dependency tree carries an
+# acceptable license. Any license NOT in the `allow` list is denied by
+# default — this means copyleft protection is automatic. A GPL dependency
+# entering the tree will immediately fail the build, protecting Ripple's
+# MIT/Apache-2.0 dual license without any explicit copyleft = "deny" needed.
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+#
+# How the allow list was determined (from known Ripple dependencies):
+#   ed25519-dalek, x25519-dalek, chacha20poly1305, hkdf, sha2, zeroize
+#     → MIT OR Apache-2.0
+#   tokio, axum, tower-http, tracing, tracing-subscriber → MIT
+#   serde, serde_json, rmp-serde → MIT OR Apache-2.0
+#   clap, rusqlite, reqwest, uuid, anyhow, thiserror → MIT OR Apache-2.0
+#   rand, hex, base64 → MIT OR Apache-2.0
+#   unicode-ident, unicode-normalization → MIT OR Apache-2.0 OR Unicode-DFS-2016
+#   webpki (rustls ecosystem) → Apache-2.0 WITH LLVM-exception
+#   subtle, curve25519-internal deps → BSD-3-Clause or ISC
+#
+# If `cargo deny check` flags a license not listed here, review it at
+# https://spdx.org/licenses/ and add it only if it is permissive and
+# compatible with MIT/Apache-2.0. Never add GPL, LGPL, AGPL, or EUPL.
+# ---------------------------------------------------------------------------
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",                               # some crypto primitive crates
+    "Unicode-3.0",                       # ICU4X crates (icu_*, zerovec, yoke, tinystr)
+    "BSD-2-Clause",                      # occasional transitive dep
+    "BSD-3-Clause",                      # occasional transitive dep (e.g. subtle)
+    "MPL-2.0",                           # webpki-roots via reqwest → rustls
+]
+
+# confidence-threshold: how closely a detected license must match the
+# canonical SPDX text. 0.8 handles minor formatting variations (copyright
+# year, author name) without producing false negatives.
+confidence-threshold = 0.8
+
+# private.ignore = true exempts workspace-internal crates (ripple-core,
+# ripple-cli, ripple-ffi, ripple-rendezvous) from the license check —
+# they're our own code and are not published to crates.io.
+[licenses.private]
+ignore = true
+registries = []
+
+# [[licenses.exceptions]] — per-crate license overrides using array-of-tables
+# syntax. Each entry grants additional licenses to a specific crate only.
+# Use sparingly — prefer adding to the main `allow` list for licenses used
+# by multiple crates; use exceptions only for genuinely one-off cases.
+#
+# Example (uncomment if ring enters the dependency tree in Phase 4+):
+#[[licenses.exceptions]]
+#allow = ["MIT", "ISC", "OpenSSL"]
+#crate = "ring"
+
+# [[licenses.clarify]] — for crates whose license can't be auto-detected
+# from metadata. Tells cargo-deny which file to use as the source of truth.
+# Uncomment if ring enters the dependency tree.
+#[[licenses.clarify]]
+#crate = "ring"
+#expression = "MIT AND ISC AND OpenSSL"
+#license-files = [
+#    { path = "LICENSE", hash = 0xbd0eed23 },
+#]
+
+# ---------------------------------------------------------------------------
+# [bans] — prevents unwanted crates from entering the dependency tree, and
+# warns on duplicate versions of the same crate (binary bloat, potential
+# type incompatibility across version boundaries).
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+# ---------------------------------------------------------------------------
+[bans]
+# multiple-versions = "warn" flags when two versions of the same crate are
+# both in the tree. Common in the tokio/hyper ecosystem (reqwest 0.11 uses
+# hyper 0.14; axum 0.7 uses hyper 1.x — an unavoidable duplicate until
+# reqwest is upgraded). Warn during active development; promote to "deny"
+# before v1.0 and resolve or skip all remaining duplicates explicitly.
+multiple-versions = "warn"
+
+# wildcards = "allow" — wildcard version requirements (version = "*").
+# We don't use these ourselves but some transitive deps might.
+wildcards = "allow"
+
+# highlight = "all" — when printing dependency graphs for duplicate warnings,
+# show both the path to the lowest duplicate version and the simplest path.
+highlight = "all"
+
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# allow = [] — crates explicitly permitted even if otherwise flagged.
+allow = []
+
+# deny — crates that must never appear in the dependency tree.
+deny = [
+    # openssl: Ripple uses pure-Rust crypto exclusively (ADR-005). If openssl
+    # appears it means a transitive dep is pulling it in — find a pure-Rust
+    # alternative or use feature flags to disable the openssl backend.
+    { crate = "openssl", reason = "ADR-005: pure-Rust crypto only. Use rustls or a crate with a rustls backend instead." },
+
+    # native-tls pulls in openssl on Linux. reqwest should use
+    # default-features = false with features = [\"rustls-tls\"] instead.
+    { crate = "native-tls", reason = "ADR-005: pure-Rust crypto only. Configure reqwest with rustls-tls feature." },
+]
+
+# skip — crates to exempt from duplicate version detection. Use when a
+# duplicate is unavoidable and you've verified no type boundary is shared
+# between the two versions.
+skip = [
+    { crate = "bitflags@1.3.2", reason = "reqwest 0.11 transitive dep; resolves when reqwest upgrades to 0.12" },
+    { crate = "hyper@0.14.32", reason = "reqwest 0.11 requires hyper 0.14; axum 0.7 requires hyper 1.x. No shared type boundary." },
+    { crate = "http@0.2.12", reason = "reqwest 0.11 ecosystem; resolves when reqwest upgrades to 0.12" },
+    { crate = "http-body@0.4.6", reason = "reqwest 0.11 ecosystem; resolves when reqwest upgrades to 0.12" },
+    { crate = "hashbrown@0.14.5", reason = "rusqlite transitive dep; resolves when hashlink updates" },
+    { crate = "getrandom@0.2.17", reason = "rand 0.8 requires getrandom 0.2; uuid requires 0.4" },
+    { crate = "socket2@0.5.10", reason = "hyper 0.14 transitive dep; resolves when reqwest upgrades to 0.12" },
+    { crate = "sync_wrapper@0.1.2", reason = "reqwest 0.11 transitive dep; resolves when reqwest upgrades to 0.12" },
+]
+
+# skip-tree — like skip, but also skips all transitive dependencies of the
+# specified crate. Use only as a last resort.
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# [sources] — controls which registries and git sources are permitted.
+# Prevents supply-chain attacks via unexpected or compromised crate sources.
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+# ---------------------------------------------------------------------------
+[sources]
+# unknown-registry = "deny" fails the build for any crate not from an
+# explicitly allowed registry. Prevents accidental use of private or
+# unofficial registries that could be compromised.
+unknown-registry = "deny"
+
+# unknown-git = "deny" fails the build for git dependencies not from an
+# explicitly allowed org. Git deps bypass crates.io's publishing process
+# and can silently change — avoid them unless absolutely necessary.
+unknown-git = "deny"
+
+# crates.io is the only allowed registry. All Ripple dependencies are
+# published crates — no git deps, no private registries.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# allow-git = [] — intentionally empty. If you ever need a git dep (e.g.
+# a fork with an unmerged security patch), add the repo URL here with a
+# comment explaining why and a ticket to remove it once upstream merges.
+allow-git = []
+
+[sources.allow-org]
+# If you add a git dependency from a GitHub org, list the org name here
+# rather than individual repo URLs — it permits any repo within that org.
+github = []
+gitlab = []
+bitbucket = []

@@ -121,7 +121,7 @@ pub unsafe extern "C" fn mesh_init(
         Err(_) => return ERR_INTERNAL,
     };
 
-    let identity = if identity_len == 32 {
+    let identity = if identity_len == 32 && !identity_bytes.is_null() {
         let key_bytes = unsafe { std::slice::from_raw_parts(identity_bytes, 32) };
         let arr: [u8; 32] = match key_bytes.try_into() {
             Ok(a) => a,
@@ -414,13 +414,13 @@ pub unsafe extern "C" fn mesh_create_bundle(
         None => return ERR_NOT_INIT,
     };
 
-    if identity_len != 32 {
+    if identity_len != 32 || identity_bytes.is_null() {
         return ERR_INTERNAL;
     }
 
-    let id_arr: [u8; 32] = unsafe {
+    let id_arr: zeroize::Zeroizing<[u8; 32]> = unsafe {
         match std::slice::from_raw_parts(identity_bytes, 32).try_into() {
-            Ok(a) => a,
+            Ok(a) => zeroize::Zeroizing::new(a),
             Err(_) => return ERR_INTERNAL,
         }
     };

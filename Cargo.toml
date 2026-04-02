@@ -29,7 +29,7 @@ sha2 = "0.10"
 zeroize = { version = "1.7", features = ["derive"] }
 clap = { version = "4.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 axum = "0.7"
@@ -46,10 +46,10 @@ dead_code      = "warn"
 all      = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
-# Pedantic lints that are too noisy for a project in active development.
-# Re-evaluate these before v1.0.
-module_name_repetitions = "allow"   # e.g. BundleError, StoreError — intentional
-missing_errors_doc      = "allow"   # doc coverage for every Result return is premature
-missing_panics_doc      = "allow"
-must_use_candidate      = "allow"   # clippy suggests #[must_use] very aggressively
+# module_name_repetitions: intentional — BundleError, StoreError, etc. are the
+# correct names at FFI boundaries and in error documentation. Keep allowed.
+module_name_repetitions = "allow"
 
+# must_use_candidate: Clippy applies this too broadly across a protocol library.
+# Add #[must_use] manually where it genuinely matters (crypto, signing).
+must_use_candidate      = "allow"
