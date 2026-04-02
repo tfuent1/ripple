@@ -62,9 +62,15 @@ from the Ed25519 private scalar and never persisted.
 ## Implementation Note
 The X25519 secret is derived as:
 ```rust
-StaticSecret::from(signing_key.to_bytes())
+StaticSecret::from(signing_key.to_scalar_bytes())
 ```
-Both key types use 32-byte Curve25519 scalars, making this conversion valid.
-The corresponding X25519 public key is derived from the secret, not converted
-from the Ed25519 public key, which avoids the Edwards-to-Montgomery conversion
-entirely.
+`to_scalar_bytes()` (exposed via the `hazmat` feature of `ed25519-dalek`)
+performs the SHA-512 expansion of the Ed25519 seed and returns the lower 32
+bytes — the actual private scalar before clamping. `StaticSecret::from()`
+then applies the RFC 7748 clamping step when constructing the key.
+
+Using `signing_key.to_bytes()` (the raw 32-byte seed) directly would bypass
+the SHA-512 expansion, producing a scalar that does not correspond to the
+Ed25519 verifying key's Montgomery form. The correctness of this derivation
+is verified by a unit test in `crypto.rs` that asserts the derived X25519
+public key matches `verifying_key().to_montgomery()`.
