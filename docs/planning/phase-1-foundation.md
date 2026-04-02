@@ -276,11 +276,13 @@ tests/
 └── cli_e2e.rs                — two CLI nodes exchange a message end-to-end
 ```
 
-**CI** runs on every push via GitHub Actions:
-- `cargo check`
-- `cargo test`
-- `cargo clippy -- -D warnings`
-- `cargo fmt --check`
+**CI** runs on every push and pull request to `main` via GitHub Actions
+(`.github/workflows/ci.yml`):
+- `cargo fmt --all -- --check` — format gate
+- `cargo clippy --all-targets --all-features` — lint gate (`-D warnings` in CI)
+- `cargo test --all` — full test suite across all workspace crates
+- `cargo deny check` — license compliance, CVE advisory check, banned crate enforcement, duplicate detection (`deny.toml`)
+- `cargo geiger --all-features` — unsafe code report (non-blocking)
 
 ---
 

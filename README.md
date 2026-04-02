@@ -32,7 +32,11 @@ See [`docs/architecture/system-overview.md`](./docs/architecture/system-overview
 
 ## Status
 
-🚧 Early planning and scaffolding phase.
+✅ Phase 1 complete — full CLI daemon with end-to-end encrypted messaging over the rendezvous relay.
+
+🚧 Phase 2 in progress — Android and iOS mobile apps.
+
+CI: ![CI](https://github.com/tfuent1/ripple/actions/workflows/ci.yml/badge.svg)
 
 ## License
 

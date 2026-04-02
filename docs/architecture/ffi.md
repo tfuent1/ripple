@@ -269,5 +269,5 @@ written before the error was detected.
   native layer needs to display received direct messages to the user.
   The CLI handles this directly via `crypto::decrypt` without going through
   FFI — this gap only applies to iOS and Android.
-- All `pub unsafe extern "C"` functions now carry `# Safety` doc sections
-  documenting pointer validity requirements for callers.
+- `mesh_init` null pointer guard on `identity_bytes` added (Phase 1 hardening)
+- `mesh_create_bundle` private key wrapped in `Zeroizing<[u8; 32]>` to guarantee zeroing on drop (Phase 1 hardening)
