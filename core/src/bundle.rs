@@ -139,6 +139,7 @@ impl Bundle {
     }
 
     /// Verify the bundle's signature against its origin public key.
+    #[must_use = "verification result must be checked — discarding it means accepting a potentially forged bundle"]
     pub fn verify(&self) -> Result<(), BundleError> {
         let bytes = self.signable_bytes()?;
         let sig_bytes: [u8; 64] = self

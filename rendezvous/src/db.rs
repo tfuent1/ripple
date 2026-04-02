@@ -66,6 +66,7 @@ impl Db {
     /// already present (INSERT OR IGNORE).
     pub fn insert_bundle(&self, raw: &[u8]) -> Result<bool, DbError> {
         let bundle = Bundle::from_bytes(raw).map_err(|e| DbError::BundleParse(e.to_string()))?;
+        bundle.verify().map_err(|e| DbError::BundleParse(e.to_string()))?;
 
         let dest_pubkey_hex = match &bundle.destination {
             Destination::Peer(pk) => hex::encode(pk),
@@ -218,5 +219,28 @@ mod tests {
         let db = Db::open(":memory:").unwrap();
         let rows = db.bundles_for_pubkey(&hex::encode([99u8; 32])).unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn insert_rejects_tampered_bundle() {
+        let db = Db::open(":memory:").unwrap();
+        let dest = [4u8; 32];
+
+        // Build a valid bundle then tamper with the payload after signing.
+        let identity = ripple_core::crypto::Identity::generate();
+        let mut bundle = ripple_core::bundle::BundleBuilder::new(
+            ripple_core::bundle::Destination::Peer(dest),
+            ripple_core::bundle::Priority::Normal,
+        )
+        .payload(b"legitimate".to_vec())
+        .build(&identity, 9_999_999_999)
+        .unwrap();
+
+        bundle.payload = b"tampered".to_vec();
+        let raw = bundle.to_bytes().unwrap();
+
+        // Signature is now invalid — server should reject it.
+        let result = db.insert_bundle(&raw);
+        assert!(result.is_err());
     }
 }

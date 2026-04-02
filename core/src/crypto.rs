@@ -83,6 +83,7 @@ impl Identity {
 // ── Signature verification ────────────────────────────────────────────────────
 
 /// Verify a bundle signature. Called when a bundle is received from a peer.
+#[must_use = "signature verification result must be checked — discarding it means accepting potentially forged data"]
 pub fn verify_signature(
     public_key_bytes: &[u8; 32],
     message: &[u8],
@@ -119,6 +120,7 @@ fn derive_key(shared_secret: &x25519_dalek::SharedSecret) -> Result<Key, CryptoE
 ///
 /// Returns: nonce (12 bytes) + ciphertext, concatenated.
 /// The nonce is randomly generated per message and must be sent with it.
+#[must_use = "encryption result must be used — discarding it means the plaintext was never protected"]
 pub fn encrypt(
     sender_identity: &Identity,
     recipient_public_key_bytes: &[u8; 32],
