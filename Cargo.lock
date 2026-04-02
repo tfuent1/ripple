@@ -1320,6 +1320,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
