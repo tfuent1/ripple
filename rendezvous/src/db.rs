@@ -128,20 +128,32 @@ impl Db {
 
 // ── Schema migrations ─────────────────────────────────────────────────────────
 
-/// Run schema migrations. Safe to call on an existing database —
-/// `CREATE TABLE IF NOT EXISTS` is idempotent.
+/// Ordered list of SQL migrations, embedded at compile time from the
+/// `rendezvous/migrations/` directory via `include_str!`.
+///
+/// Rules:
+/// - Never modify an existing entry — it may already be applied to live databases.
+/// - To add a migration: create `NNN_description.sql` in `rendezvous/migrations/`
+///   and add a corresponding `include_str!` line here. The version number is
+///   derived automatically from position — no manual incrementing required.
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/001_initial_schema.sql"),
+    // include_str!("../migrations/002_your_next_migration.sql"),
+];
+
 fn migrate(conn: &Connection) -> Result<(), DbError> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS bundles (
-            id          TEXT    PRIMARY KEY,
-            dest_pubkey TEXT    NOT NULL,
-            raw         BLOB    NOT NULL,
-            expires_at  INTEGER,
-            created_at  INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_dest     ON bundles(dest_pubkey);
-        CREATE INDEX IF NOT EXISTS idx_expires  ON bundles(expires_at);",
-    )?;
+    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+
+    let current_version: usize = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+    for (i, sql) in MIGRATIONS.iter().enumerate() {
+        let migration_version = i + 1;
+        if current_version < migration_version {
+            conn.execute_batch(sql)?;
+            conn.execute_batch(&format!("PRAGMA user_version = {migration_version};"))?;
+        }
+    }
+
     Ok(())
 }
 
