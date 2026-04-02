@@ -74,7 +74,7 @@ impl RateLimiter {
         // `entry.0 % 100 == 0` fires roughly once per window per active IP,
         // which is cheap enough. We retain() only entries whose window has not
         // yet expired — stale ones are gone.
-        if entry.0 % 100 == 0 {
+        if entry.0.is_multiple_of(100) {
             self.counters.retain(|_, (_, window_start)| {
                 now.duration_since(*window_start) < RATE_LIMIT_WINDOW
             });
