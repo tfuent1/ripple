@@ -208,7 +208,7 @@ first real end-to-end validation of the entire core.
 ```toml
 clap = { version = "4.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 ```
@@ -290,7 +290,7 @@ tests/
 
 Phase 1 is complete when:
 
-1. `cargo test` passes with zero failures and zero warnings (97 tests, 95.8% line coverage)
+1. `cargo test` passes with zero failures and zero warnings (119 tests across all crates)
 2. `cargo clippy -- -D warnings` passes clean
 3. Two `ripple daemon` instances can exchange an encrypted direct message
    through the rendezvous server

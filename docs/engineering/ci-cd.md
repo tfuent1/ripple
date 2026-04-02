@@ -108,11 +108,9 @@ needed. The current allow list is:
 |---|---|
 | MIT | Most of the ecosystem |
 | Apache-2.0 | Most of the ecosystem |
-| ISC | Some crypto primitive crates |
 | Unicode-3.0 | ICU4X crates pulled in via reqwest → url → idna |
 | BSD-2-Clause | Occasional transitive dep |
 | BSD-3-Clause | subtle, curve25519 internals |
-| MPL-2.0 | webpki-roots via reqwest → rustls |
 
 Workspace-internal crates (ripple-core, ripple-cli, ripple-ffi,
 ripple-rendezvous) are exempt — they are our own code and are not published
@@ -126,13 +124,13 @@ Currently banned:
 | `openssl` | ADR-005: pure-Rust crypto only |
 | `native-tls` | ADR-005: pulls in openssl on Linux |
 
-`reqwest` is configured with `default-features = false, features = ["rustls-tls"]`
-to avoid native-tls. If either banned crate appears after a dependency update,
-the build fails immediately with the ban reason printed.
+`reqwest` is configured with `default-features = false, features = ["json"]`
+to avoid native-tls. reqwest 0.13 defaults to rustls, so no explicit TLS
+feature is required.
 
-A set of known duplicate crate versions are listed in the `skip` array — these
-are all caused by the reqwest 0.11 / axum 0.7 split on the hyper ecosystem and
-will resolve when reqwest is upgraded to 0.12 in a future milestone.
+A small set of known duplicate crate versions are listed in the `skip` array —
+currently only `getrandom`, caused by `rand 0.8` requiring `getrandom 0.2`
+while `uuid` requires `0.4`. This will resolve when `rand` upgrades to 0.9.
 
 **Sources** — verifies every crate comes from crates.io. Git dependencies and
 unknown registries fail the build. The `allow-git` list is intentionally empty.
@@ -238,5 +236,5 @@ and remove or replace the offending dep.
   require explicit review
 - Add `cargo outdated` as a scheduled monthly workflow (separate from CI) to
   surface available dependency updates without blocking every push
-- Promote `bans.multiple-versions` from `"warn"` to `"deny"` and resolve all
-  remaining duplicates when reqwest upgrades to 0.12 (hyper 1.x ecosystem)
+- Promote `bans.multiple-versions` from `"warn"` to `"deny"` once the
+  remaining `getrandom` duplicate resolves with a `rand 0.9` upgrade
