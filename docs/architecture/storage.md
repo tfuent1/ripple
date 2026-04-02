@@ -92,10 +92,18 @@ Waiting phase. SOS bundles have `spray_remaining = NULL` and are never
 decremented.
 
 **`Schema versioning`** — the database uses SQLite's built-in `user_version`
-PRAGMA for migration tracking. `migrate()` checks `PRAGMA user_version` on
-startup and runs only the migrations the database still needs. Currently at
-version 1. Adding a new migration means adding an `if version < N` block —
-never modifying existing blocks.
+PRAGMA for migration tracking. Migrations are defined as plain `.sql` files
+in `core/migrations/` and embedded into the binary at compile time via
+`include_str!`. On startup, `migrate()` reads `PRAGMA user_version` and runs
+only the migrations the database still needs — the version number is derived
+automatically from each file's position in the `MIGRATIONS` slice, so there
+is nothing to increment manually.
+
+To add a migration: create `NNN_description.sql` in `core/migrations/` (or
+`rendezvous/migrations/` for the rendezvous server) and add the corresponding
+`include_str!` line to the `MIGRATIONS` constant in `store.rs` (or `db.rs`).
+Never modify or delete an existing migration file — it may already be applied
+to live databases.
 
 **`unread_count()`** — returns the count of peer bundles where `delivered = 1`
 and `displayed = 0`. Broadcast bundles are excluded — only direct messages
