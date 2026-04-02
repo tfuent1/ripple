@@ -166,6 +166,18 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
                     warn!("relay submit failed for {}: {e}", bundle.id);
                 } else {
                     info!("submitted bundle {} to relay", bundle.id);
+                    // Mark delivered so we don't re-submit this bundle on the
+                    // next tick. The relay uses INSERT OR IGNORE so duplicates
+                    // are harmless, but re-submitting everything every 30s
+                    // wastes bandwidth and server resources as the store grows.
+                    //
+                    // Lock scope: same pattern as everywhere else in this file —
+                    // hold the lock only for the synchronous store call, release
+                    // it before the next .await.
+                    let r = router.lock().unwrap();
+                    if let Err(e) = r.store().mark_delivered(bundle.id) {
+                        warn!("mark_delivered failed for {}: {e}", bundle.id);
+                    }
                 }
             }
             Err(e) => warn!("failed to serialize bundle {}: {e}", bundle.id),
