@@ -6,7 +6,7 @@ use ripple_core::routing::Router;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(
-    router: &mut Router,
+    router: &Router,
     identity: &Identity,
     message: &str,
     to_pubkey_hex: Option<&str>,
@@ -29,7 +29,7 @@ pub fn run(
         .payload(message.as_bytes().to_vec())
         .build(identity, now)?;
 
-    router.store().insert_bundle(&bundle)?;
+    router.queue_outbound(&bundle)?;
 
     println!("queued bundle {}", bundle.id);
     Ok(())

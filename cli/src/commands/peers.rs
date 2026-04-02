@@ -7,7 +7,7 @@ pub fn run(router: &Router) -> anyhow::Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     let since = now - 24 * 3600; // last 24 hours
-    let encounters = router.store().recent_encounters(since)?;
+    let encounters = router.recent_encounters(since)?;
 
     if encounters.is_empty() {
         println!("no peers encountered in the last 24 hours");

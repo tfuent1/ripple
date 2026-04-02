@@ -227,10 +227,77 @@ impl Router {
         Ok(vec![])
     }
 
-    /// Expose the store for CLI tooling that needs direct access.
-    /// Routing logic should always go through Router methods, not this.
-    pub fn store(&self) -> &Store {
-        &self.store
+    /// Queue an outbound bundle created locally. Does NOT re-verify the
+    /// signature — the caller just built and signed this bundle, so it
+    /// is implicitly trusted. Signature verification happens in
+    /// `on_bundle_received` for bundles arriving from peers.
+    pub fn queue_outbound(&self, bundle: &Bundle) -> Result<(), RouterError> {
+        self.store.insert_bundle(bundle)?;
+        Ok(())
+    }
+
+    /// Fetch a bundle by ID for display or forwarding.
+    pub fn get_bundle(&self, id: uuid::Uuid) -> Result<Option<Bundle>, RouterError> {
+        Ok(self.store.get_bundle(id)?)
+    }
+
+    /// All bundles pending outbound submission to the rendezvous server.
+    pub fn outbound_bundles(&self) -> Result<Vec<Bundle>, RouterError> {
+        Ok(self.store.all_pending_submission()?)
+    }
+
+    /// Mark a bundle as submitted to the rendezvous server. It will not
+    /// be included in future `outbound_bundles()` results.
+    pub fn mark_submitted(&self, id: uuid::Uuid) -> Result<(), RouterError> {
+        self.store.mark_submitted(id)?;
+        Ok(())
+    }
+
+    /// Mark a bundle as delivered (received and processed from the relay).
+    pub fn mark_delivered(&self, id: uuid::Uuid) -> Result<(), RouterError> {
+        self.store.mark_delivered(id)?;
+        Ok(())
+    }
+
+    /// Mark a bundle as displayed to the user.
+    pub fn mark_displayed(&self, id: uuid::Uuid) -> Result<(), RouterError> {
+        self.store.mark_displayed(id)?;
+        Ok(())
+    }
+
+    /// Count unread peer messages. Used by `ripple status`.
+    pub fn unread_count(&self) -> Result<u32, RouterError> {
+        Ok(self.store.unread_count()?)
+    }
+
+    /// Recent peer encounters since `since`. Used by `ripple peers`.
+    pub fn recent_encounters(
+        &self,
+        since: i64,
+    ) -> Result<Vec<crate::store::Encounter>, RouterError> {
+        Ok(self.store.recent_encounters(since)?)
+    }
+
+    /// Return all queued bundles destined for a specific peer.
+    ///
+    /// Used by the FFI layer to hand bundles to the transport when a peer
+    /// is in range. In Phase 2 this will be called by BLE/WiFi Direct
+    /// transports to know what to transmit during a sync session.
+    pub fn bundles_for_peer(&self, x25519_pubkey: &[u8; 32]) -> Result<Vec<Bundle>, RouterError> {
+        Ok(self.store.bundles_for_peer(x25519_pubkey)?)
+    }
+
+    /// Return the current spray_remaining count for a bundle.
+    ///
+    /// Returns `None` if the bundle has epidemic routing (SOS) or wasn't found.
+    /// Used by integration tests to verify Spray and Wait state transitions
+    /// without going through the internal store.
+    pub fn spray_remaining(&self, id: uuid::Uuid) -> Result<Option<u8>, RouterError> {
+        // decrement_spray is the only store method that reads spray_remaining.
+        // We expose a non-mutating read here by querying directly.
+        // This is acceptable test infrastructure — production code uses
+        // on_bundle_forwarded which calls decrement_spray internally.
+        Ok(self.store.spray_remaining(id)?)
     }
 }
 

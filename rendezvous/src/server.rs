@@ -65,6 +65,21 @@ impl RateLimiter {
         }
 
         entry.0 += 1;
+
+        // Evict stale entries on every 100th request to prevent unbounded
+        // growth. An attacker sending from rotating IPs would otherwise grow
+        // this map without limit. We evict lazily (not on a timer) to avoid
+        // needing a background task.
+        //
+        // `entry.0 % 100 == 0` fires roughly once per window per active IP,
+        // which is cheap enough. We retain() only entries whose window has not
+        // yet expired — stale ones are gone.
+        if entry.0 % 100 == 0 {
+            self.counters.retain(|_, (_, window_start)| {
+                now.duration_since(*window_start) < RATE_LIMIT_WINDOW
+            });
+        }
+
         true
     }
 }

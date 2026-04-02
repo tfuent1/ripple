@@ -52,7 +52,7 @@ pub struct Store {
 ///   derived automatically from position — no manual incrementing required.
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/001_initial_schema.sql"),
-    // include_str!("../migrations/002_your_next_migration.sql"),
+    include_str!("../migrations/002_add_submitted_column.sql"),
 ];
 
 impl Store {
@@ -90,7 +90,13 @@ impl Store {
 
     // ── Bundle operations ─────────────────────────────────────────────────────
 
-    /// Persist a bundle. Overwrites silently on duplicate ID (idempotent).
+    /// Persist a bundle. Silently ignores duplicate IDs (idempotent via INSERT OR IGNORE).
+    ///
+    /// **Caller is responsible for signature verification.** This method does
+    /// not call `bundle.verify()`. For locally-created bundles this is correct —
+    /// the builder just signed it. For bundles received from peers, callers must
+    /// verify before inserting. `Router::on_bundle_received` does this; direct
+    /// store callers must do it themselves.
     ///
     /// We serialize the entire bundle to MessagePack and store it in `raw`.
     /// The other columns are extracted fields used for efficient querying
@@ -180,20 +186,18 @@ impl Store {
         Ok(bundles)
     }
 
-    /// Return all bundles not yet delivered, regardless of destination.
+    /// Return all bundles not yet submitted to the rendezvous server.
     ///
-    /// Used by the CLI relay loop to submit outbound bundles to the
-    /// rendezvous server. In Phase 1 we relay everything; Phase 3 will
-    /// add transport-aware filtering so we skip bundles already within
-    /// BLE range.
+    /// "Submitted" means we POSTed the bundle to the relay. This is
+    /// distinct from "delivered" (the recipient processed the bundle).
+    /// A bundle moves through: unsubmitted → submitted → delivered.
     ///
-    /// **Rust note:** `[]` as the params argument means "no bind parameters".
-    /// `query_map` with no params is just a full-table scan — same pattern
-    /// as `bundles_for_peer` but without the WHERE clause.
-    pub fn all_undelivered(&self) -> Result<Vec<Bundle>, StoreError> {
+    /// In Phase 1 we relay everything; Phase 3 will add transport-aware
+    /// filtering so we skip bundles already synced over BLE.
+    pub fn all_pending_submission(&self) -> Result<Vec<Bundle>, StoreError> {
         let mut stmt = self
             .conn
-            .prepare("SELECT raw FROM bundles WHERE delivered = 0")?;
+            .prepare("SELECT raw FROM bundles WHERE submitted = 0 AND delivered = 0")?;
 
         let bundles = stmt
             .query_map([], |row| {
@@ -207,6 +211,16 @@ impl Store {
             .collect::<Result<Vec<Bundle>, StoreError>>()?;
 
         Ok(bundles)
+    }
+
+    /// Mark a bundle as submitted to the rendezvous server.
+    /// It will no longer appear in `all_pending_submission`.
+    pub fn mark_submitted(&self, id: Uuid) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE bundles SET submitted = 1 WHERE id = ?1",
+            params![id.to_string()],
+        )?;
+        Ok(())
     }
 
     /// Mark a bundle as delivered so it is no longer returned by queries.
@@ -261,6 +275,22 @@ impl Store {
         // `execute` returns the number of rows affected as usize.
         // We cast to u32 — safe because we'll never delete 4 billion rows.
         Ok(count as u32)
+    }
+
+    /// Read the current spray_remaining count without modifying it.
+    /// Returns `None` if the bundle uses epidemic routing or wasn't found.
+    pub fn spray_remaining(&self, id: Uuid) -> Result<Option<u8>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT spray_remaining FROM bundles WHERE id = ?1")?;
+
+        let result = stmt.query_row(params![id.to_string()], |row| row.get::<_, Option<u8>>(0));
+
+        match result {
+            Ok(val) => Ok(val),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Db(e)),
+        }
     }
 
     /// Decrement the spray count for a bundle by 1.
@@ -611,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_undelivered() {
+    fn test_all_pending_submission() {
         let store = test_store();
         let alice = Identity::generate();
         let bob = Identity::generate();
@@ -624,12 +654,22 @@ mod tests {
             .payload(b"two".to_vec())
             .build(&alice, NOW)
             .unwrap();
+        let b3 = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"three".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
 
         store.insert_bundle(&b1).unwrap();
         store.insert_bundle(&b2).unwrap();
-        store.mark_delivered(b1.id).unwrap();
+        store.insert_bundle(&b3).unwrap();
 
-        let pending = store.all_undelivered().unwrap();
+        // b1 submitted to relay — no longer pending.
+        store.mark_submitted(b1.id).unwrap();
+        // b3 delivered (inbound processed) — also excluded.
+        store.mark_delivered(b3.id).unwrap();
+
+        // Only b2 is still pending submission.
+        let pending = store.all_pending_submission().unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, b2.id);
     }

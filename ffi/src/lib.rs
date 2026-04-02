@@ -357,7 +357,7 @@ pub unsafe extern "C" fn mesh_bundles_for_peer(
         Err(_) => return ERR_INTERNAL,
     };
 
-    let bundles = match router.store().bundles_for_peer(&x_key) {
+    let bundles = match router.bundles_for_peer(&x_key) {
         Ok(b) => b,
         Err(_) => return ERR_INTERNAL,
     };
@@ -460,7 +460,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
         Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
-    if router.store().insert_bundle(&bundle).is_err() {
+    if router.queue_outbound(&bundle).is_err() {
         return ERR_INTERNAL;
     }
 

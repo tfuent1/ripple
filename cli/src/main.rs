@@ -86,8 +86,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Command::Send { to, message } => {
-            let mut router = router;
-            commands::send::run(&mut router, &identity, &message, to.as_deref())?;
+            commands::send::run(&router, &identity, &message, to.as_deref())?;
         }
 
         Command::Status => {

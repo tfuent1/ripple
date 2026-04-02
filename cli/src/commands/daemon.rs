@@ -156,7 +156,7 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
     // ever acquire it, which is a deadlock.
     let bundles: Vec<Bundle> = {
         let r = router.lock().unwrap();
-        r.store().all_undelivered().unwrap_or_default()
+        r.outbound_bundles().unwrap_or_default()
     }; // <-- lock released here
 
     for bundle in bundles {
@@ -166,17 +166,13 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
                     warn!("relay submit failed for {}: {e}", bundle.id);
                 } else {
                     info!("submitted bundle {} to relay", bundle.id);
-                    // Mark delivered so we don't re-submit this bundle on the
-                    // next tick. The relay uses INSERT OR IGNORE so duplicates
-                    // are harmless, but re-submitting everything every 30s
-                    // wastes bandwidth and server resources as the store grows.
-                    //
-                    // Lock scope: same pattern as everywhere else in this file —
-                    // hold the lock only for the synchronous store call, release
-                    // it before the next .await.
+                    // Mark submitted so we don't re-POST on the next tick.
+                    // "submitted" = sent to rendezvous server (outbound done).
+                    // "delivered" = received by the destination (inbound processed).
+                    // These are separate flags — see store migration 002.
                     let r = router.lock().unwrap();
-                    if let Err(e) = r.store().mark_delivered(bundle.id) {
-                        warn!("mark_delivered failed for {}: {e}", bundle.id);
+                    if let Err(e) = r.mark_submitted(bundle.id) {
+                        warn!("mark_submitted failed for {}: {e}", bundle.id);
                     }
                 }
             }
@@ -239,7 +235,7 @@ async fn fetch_inbound(
                 // Mark delivered locally so we don't process it again.
                 {
                     let r = router.lock().unwrap();
-                    if let Err(e) = r.store().mark_delivered(bundle_id) {
+                    if let Err(e) = r.mark_delivered(bundle_id) {
                         warn!("mark_delivered failed for {bundle_id}: {e}");
                     }
                 }
@@ -272,7 +268,7 @@ fn handle_actions(
                 // time necessary — no lock is held during the decrypt or print.
                 let bundle = {
                     let r = router.lock().unwrap();
-                    r.store().get_bundle(bundle_id)
+                    r.get_bundle(bundle_id)
                 };
 
                 match bundle {
@@ -296,7 +292,7 @@ fn handle_actions(
                                 println!("📨  from {} | {}", hex::encode(&b.origin[..8]), text);
                                 // Mark displayed so `ripple status` unread count clears.
                                 let r = router.lock().unwrap();
-                                if let Err(e) = r.store().mark_displayed(bundle_id) {
+                                if let Err(e) = r.mark_displayed(bundle_id) {
                                     warn!("mark_displayed failed for {bundle_id}: {e}");
                                 }
                             }

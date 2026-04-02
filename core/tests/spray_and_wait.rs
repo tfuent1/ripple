@@ -44,7 +44,7 @@ fn alice_creates_bob_relays_charlie_receives() {
     .unwrap();
 
     let bundle_id = bundle.id;
-    alice_router.store().insert_bundle(&bundle).unwrap();
+    alice_router.queue_outbound(&bundle).unwrap();
 
     // ── Step 2: Alice encounters Bob — returns a SyncOffer ─────────────────
     let offer = alice_router
@@ -100,7 +100,7 @@ fn alice_creates_bob_relays_charlie_receives() {
     );
 
     // ── Step 6: Charlie receives the bundle from Bob ───────────────────────
-    let bundle_for_charlie = bob_router.store().get_bundle(bundle_id).unwrap().unwrap();
+    let bundle_for_charlie = bob_router.get_bundle(bundle_id).unwrap().unwrap();
 
     let charlie_bytes = bundle_for_charlie.to_bytes().unwrap();
     let final_bundle = ripple_core::bundle::Bundle::from_bytes(&charlie_bytes).unwrap();
@@ -135,23 +135,23 @@ fn spray_count_decrements_on_each_forward() {
     .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
     // Decrement three times.
     router.on_bundle_forwarded(bundle_id).unwrap(); // 6 → 5
     router.on_bundle_forwarded(bundle_id).unwrap(); // 5 → 4
     router.on_bundle_forwarded(bundle_id).unwrap(); // 4 → 3
 
-    // Check remaining via store directly.
-    let remaining = router.store().decrement_spray(bundle_id).unwrap(); // 3 → 2
-    assert_eq!(remaining, Some(2));
+    // Verify remaining via the Router's inspection method.
+    let remaining = router.spray_remaining(bundle_id).unwrap();
+    assert_eq!(remaining, Some(3));
 }
 
 #[test]
 fn normal_bundle_starts_with_spray_count_6() {
     let alice = Identity::generate();
     let bob = Identity::generate();
-    let router = make_router(&alice);
+    let mut router = make_router(&alice);
 
     let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
         .payload(b"normal".to_vec())
@@ -159,10 +159,11 @@ fn normal_bundle_starts_with_spray_count_6() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
-    // First decrement from 6 → 5.
-    let remaining = router.store().decrement_spray(bundle_id).unwrap();
+    // Starts at 6, then decrement once.
+    router.on_bundle_forwarded(bundle_id).unwrap(); // 6 → 5
+    let remaining = router.spray_remaining(bundle_id).unwrap();
     assert_eq!(remaining, Some(5));
 }
 
@@ -170,7 +171,7 @@ fn normal_bundle_starts_with_spray_count_6() {
 fn urgent_bundle_starts_with_spray_count_20() {
     let alice = Identity::generate();
     let bob = Identity::generate();
-    let router = make_router(&alice);
+    let mut router = make_router(&alice);
 
     let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Urgent)
         .payload(b"urgent".to_vec())
@@ -178,10 +179,11 @@ fn urgent_bundle_starts_with_spray_count_20() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
-    // First decrement from 20 → 19.
-    let remaining = router.store().decrement_spray(bundle_id).unwrap();
+    // Starts at 20, then decrement once.
+    router.on_bundle_forwarded(bundle_id).unwrap(); // 20 → 19
+    let remaining = router.spray_remaining(bundle_id).unwrap();
     assert_eq!(remaining, Some(19));
 }
 
@@ -198,10 +200,10 @@ fn sos_bundle_has_no_spray_count() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
-    // SOS bundles have spray_remaining = NULL — decrement returns None.
-    let remaining = router.store().decrement_spray(bundle_id).unwrap();
+    // SOS bundles have spray_remaining = NULL — returns None.
+    let remaining = router.spray_remaining(bundle_id).unwrap();
     assert_eq!(remaining, None, "SOS bundles must not have a spray count");
 }
 
@@ -216,12 +218,12 @@ fn sos_bundle_is_never_expired_by_mesh_tick() {
         .unwrap();
 
     let sos_id = sos.id;
-    router.store().insert_bundle(&sos).unwrap();
+    router.queue_outbound(&sos).unwrap();
 
     // Tick far into the future — SOS must survive.
     router.mesh_tick(NOW + 999_999_999).unwrap();
 
-    let bundle = router.store().get_bundle(sos_id).unwrap();
+    let bundle = router.get_bundle(sos_id).unwrap();
     assert!(
         bundle.is_some(),
         "SOS bundle must survive mesh_tick regardless of elapsed time"
@@ -268,7 +270,7 @@ fn receiving_duplicate_bundle_is_idempotent() {
         .any(|a| matches!(a, Action::NotifyUser { bundle_id: id } if *id == bundle_id)));
 
     // The bundle must exist exactly once in the store.
-    let stored = router.store().get_bundle(bundle_id).unwrap();
+    let stored = router.get_bundle(bundle_id).unwrap();
     assert!(stored.is_some());
 }
 
@@ -291,7 +293,7 @@ fn peer_encounter_is_logged_to_store() {
         .unwrap();
 
     // Encounter must be persisted for PRoPHET routing in Phase 3.
-    let encounters = router.store().recent_encounters(NOW - 1).unwrap();
+    let encounters = router.recent_encounters(NOW - 1).unwrap();
     assert_eq!(encounters.len(), 1);
     assert_eq!(encounters[0].peer_pubkey, bob.x25519_public_key());
 }

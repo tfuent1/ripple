@@ -30,19 +30,19 @@ fn normal_bundle_expires_after_24h() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
     // Not expired yet.
-    assert!(router.store().get_bundle(bundle_id).unwrap().is_some());
+    assert!(router.get_bundle(bundle_id).unwrap().is_some());
 
     // Tick just before expiry — bundle survives.
     router.mesh_tick(NOW + 24 * 3600 - 1).unwrap();
-    assert!(router.store().get_bundle(bundle_id).unwrap().is_some());
+    assert!(router.get_bundle(bundle_id).unwrap().is_some());
 
     // Tick at expiry — bundle is gone.
     router.mesh_tick(NOW + 24 * 3600).unwrap();
     assert!(
-        router.store().get_bundle(bundle_id).unwrap().is_none(),
+        router.get_bundle(bundle_id).unwrap().is_none(),
         "normal bundle must be expired after 24h"
     );
 }
@@ -58,16 +58,16 @@ fn urgent_bundle_expires_after_12h() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
+    router.queue_outbound(&bundle).unwrap();
 
     // Tick just before 12h — survives.
     router.mesh_tick(NOW + 12 * 3600 - 1).unwrap();
-    assert!(router.store().get_bundle(bundle_id).unwrap().is_some());
+    assert!(router.get_bundle(bundle_id).unwrap().is_some());
 
     // Tick at 12h — gone.
     router.mesh_tick(NOW + 12 * 3600).unwrap();
     assert!(
-        router.store().get_bundle(bundle_id).unwrap().is_none(),
+        router.get_bundle(bundle_id).unwrap().is_none(),
         "urgent bundle must be expired after 12h"
     );
 }
@@ -85,13 +85,13 @@ fn sos_bundle_survives_far_future_tick() {
         .unwrap();
 
     let sos_id = sos.id;
-    router.store().insert_bundle(&sos).unwrap();
+    router.queue_outbound(&sos).unwrap();
 
     // Tick 100 years into the future.
     router.mesh_tick(NOW + 100 * 365 * 24 * 3600).unwrap();
 
     assert!(
-        router.store().get_bundle(sos_id).unwrap().is_some(),
+        router.get_bundle(sos_id).unwrap().is_some(),
         "SOS bundle must never be expired by mesh_tick"
     );
 }
@@ -114,22 +114,22 @@ fn sos_survives_while_normal_bundles_expire() {
     let normal_id = normal.id;
     let sos_id = sos.id;
 
-    router.store().insert_bundle(&normal).unwrap();
-    router.store().insert_bundle(&sos).unwrap();
+    router.queue_outbound(&normal).unwrap();
+    router.queue_outbound(&sos).unwrap();
 
     // Both present before expiry.
-    assert!(router.store().get_bundle(normal_id).unwrap().is_some());
-    assert!(router.store().get_bundle(sos_id).unwrap().is_some());
+    assert!(router.get_bundle(normal_id).unwrap().is_some());
+    assert!(router.get_bundle(sos_id).unwrap().is_some());
 
     // Tick past 24h — normal expires, SOS survives.
     router.mesh_tick(NOW + 25 * 3600).unwrap();
 
     assert!(
-        router.store().get_bundle(normal_id).unwrap().is_none(),
+        router.get_bundle(normal_id).unwrap().is_none(),
         "normal bundle must expire"
     );
     assert!(
-        router.store().get_bundle(sos_id).unwrap().is_some(),
+        router.get_bundle(sos_id).unwrap().is_some(),
         "SOS bundle must survive"
     );
 }
@@ -149,14 +149,14 @@ fn multiple_expired_bundles_all_cleaned_up() {
                 .build(&identity, NOW)
                 .unwrap();
             let id = bundle.id;
-            router.store().insert_bundle(&bundle).unwrap();
+            router.queue_outbound(&bundle).unwrap();
             id
         })
         .collect();
 
     // All present before expiry.
     for id in &ids {
-        assert!(router.store().get_bundle(*id).unwrap().is_some());
+        assert!(router.get_bundle(*id).unwrap().is_some());
     }
 
     // Tick past 24h — all gone.
@@ -164,7 +164,7 @@ fn multiple_expired_bundles_all_cleaned_up() {
 
     for id in &ids {
         assert!(
-            router.store().get_bundle(*id).unwrap().is_none(),
+            router.get_bundle(*id).unwrap().is_none(),
             "bundle {id} should have been expired"
         );
     }
@@ -190,18 +190,18 @@ fn bundles_created_at_different_times_expire_independently() {
     let id_a = bundle_a.id;
     let id_b = bundle_b.id;
 
-    router.store().insert_bundle(&bundle_a).unwrap();
-    router.store().insert_bundle(&bundle_b).unwrap();
+    router.queue_outbound(&bundle_a).unwrap();
+    router.queue_outbound(&bundle_b).unwrap();
 
     // Tick at NOW + 25h — A expired, B still alive.
     router.mesh_tick(NOW + 25 * 3600).unwrap();
 
     assert!(
-        router.store().get_bundle(id_a).unwrap().is_none(),
+        router.get_bundle(id_a).unwrap().is_none(),
         "bundle A must be expired at NOW + 25h"
     );
     assert!(
-        router.store().get_bundle(id_b).unwrap().is_some(),
+        router.get_bundle(id_b).unwrap().is_some(),
         "bundle B must still be alive at NOW + 25h"
     );
 
@@ -209,7 +209,7 @@ fn bundles_created_at_different_times_expire_independently() {
     router.mesh_tick(NOW + 37 * 3600).unwrap();
 
     assert!(
-        router.store().get_bundle(id_b).unwrap().is_none(),
+        router.get_bundle(id_b).unwrap().is_none(),
         "bundle B must be expired at NOW + 37h"
     );
 }
@@ -230,16 +230,16 @@ fn delivered_bundles_are_not_visible_regardless_of_expiry() {
         .unwrap();
 
     let bundle_id = bundle.id;
-    router.store().insert_bundle(&bundle).unwrap();
-    router.store().mark_delivered(bundle_id).unwrap();
+    router.queue_outbound(&bundle).unwrap();
+    router.mark_delivered(bundle_id).unwrap();
 
     // Delivered bundles don't appear in get_bundle.
-    assert!(router.store().get_bundle(bundle_id).unwrap().is_none());
+    assert!(router.get_bundle(bundle_id).unwrap().is_none());
 
     // Ticking past expiry doesn't cause any issues — row still exists in
     // SQLite (delivered = 1) until a future cleanup pass removes it.
     router.mesh_tick(NOW + 25 * 3600).unwrap();
 
     // Still not visible — mark_delivered hides it regardless.
-    assert!(router.store().get_bundle(bundle_id).unwrap().is_none());
+    assert!(router.get_bundle(bundle_id).unwrap().is_none());
 }
