@@ -36,6 +36,16 @@ const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 /// Per-IP submission counter for rate limiting.
 ///
 /// We keep a `HashMap` of `(count, window_start)` keyed by IP address.
+///
+/// KNOWN LIMITATIONS (Phase 1 — address in Phase 4 server hardening):
+/// - State is in-memory only: resets on server restart and is not shared
+///   across multiple server instances. Sufficient for single-server Phase 1
+///   deployment; needs Redis or a DB-backed counter for horizontal scaling.
+/// - Eviction is lazy: stale entries for IPs that go silent after fewer than
+///   100 submissions persist until that IP submits again. Under sustained
+///   low-volume abuse from many distinct IPs the map can grow slowly without
+///   bound. A background eviction task would fix this.
+///
 /// On each POST /bundle we check whether the window has expired (reset if so)
 /// and whether the count is under the limit.
 ///

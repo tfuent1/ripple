@@ -87,9 +87,13 @@ pub async fn ack_bundle(
     server_url: &str,
     bundle_id: uuid::Uuid,
 ) -> Result<(), RelayError> {
-    client
+    let resp = client
         .delete(format!("{server_url}/bundle/{bundle_id}"))
         .send()
         .await?;
+
+    if !resp.status().is_success() {
+        return Err(RelayError::ServerError(resp.status()));
+    }
     Ok(())
 }

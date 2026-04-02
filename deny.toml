@@ -115,11 +115,9 @@ ignore = [
 allow = [
     "MIT",
     "Apache-2.0",
-    "ISC",                               # some crypto primitive crates
     "Unicode-3.0",                       # ICU4X crates (icu_*, zerovec, yoke, tinystr)
     "BSD-2-Clause",                      # occasional transitive dep
     "BSD-3-Clause",                      # occasional transitive dep (e.g. subtle)
-    "MPL-2.0",                           # webpki-roots via reqwest → rustls
 ]
 
 # confidence-threshold: how closely a detected license must match the
@@ -198,14 +196,7 @@ deny = [
 # duplicate is unavoidable and you've verified no type boundary is shared
 # between the two versions.
 skip = [
-    { crate = "bitflags@1.3.2", reason = "reqwest 0.11 transitive dep; resolves when reqwest upgrades to 0.12" },
-    { crate = "hyper@0.14.32", reason = "reqwest 0.11 requires hyper 0.14; axum 0.7 requires hyper 1.x. No shared type boundary." },
-    { crate = "http@0.2.12", reason = "reqwest 0.11 ecosystem; resolves when reqwest upgrades to 0.12" },
-    { crate = "http-body@0.4.6", reason = "reqwest 0.11 ecosystem; resolves when reqwest upgrades to 0.12" },
-    { crate = "hashbrown@0.14.5", reason = "rusqlite transitive dep; resolves when hashlink updates" },
     { crate = "getrandom@0.2.17", reason = "rand 0.8 requires getrandom 0.2; uuid requires 0.4" },
-    { crate = "socket2@0.5.10", reason = "hyper 0.14 transitive dep; resolves when reqwest upgrades to 0.12" },
-    { crate = "sync_wrapper@0.1.2", reason = "reqwest 0.11 transitive dep; resolves when reqwest upgrades to 0.12" },
 ]
 
 # skip-tree — like skip, but also skips all transitive dependencies of the

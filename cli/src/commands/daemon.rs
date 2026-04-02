@@ -29,14 +29,18 @@ use tracing::{error, info, warn};
 /// The caller (`main.rs`) drives it with `Runtime::block_on(...)`, which
 /// runs it to completion on the current thread.
 pub async fn run(router: Router, identity: Identity, server_url: String, quiet: bool) {
-    // Wrap Router in Arc<Mutex<...>> so both tasks can share it.
+    // INVARIANT: rusqlite::Connection is !Send, which means Store (and therefore
+    // Router) is also !Send in isolation. Wrapping in Mutex<T> makes the whole
+    // Arc<Mutex<Router>> Send + Sync — the lock guarantees only one thread
+    // touches the Connection at a time, satisfying SQLite's thread-safety
+    // requirements.
     //
-    // Arc  = "Atomic Reference Count" — shared ownership across tasks.
-    //        Think of it as a thread-safe version of PHP's reference counting.
-    // Mutex = mutual exclusion — only one task touches the Router at a time.
+    // This is safe here because both tokio tasks (tick_task and relay_task)
+    // acquire the lock only for synchronous calls and release it immediately
+    // before any .await point. The Connection is never accessed concurrently.
     //
-    // Each `Arc::clone` creates a new *handle* to the same underlying data,
-    // not a copy of the data itself. Cheap to clone, safe to share.
+    // If a third task is added, or this codebase migrates to tokio-rusqlite
+    // for async DB access in Phase 2, revisit this invariant.
     let router = Arc::new(Mutex::new(router));
 
     // Identity is read-only after startup — no mutation needed, so no Mutex.

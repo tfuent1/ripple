@@ -7,7 +7,7 @@ license.workspace = true
 
 [lib]
 name = "ripple_ffi"
-crate-type = ["staticlib", "cdylib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 ripple-core = { path = "../core" }
@@ -15,3 +15,11 @@ rmp-serde = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 zeroize = { workspace = true }
+
+[dev-dependencies]
+ripple-core = { path = "../core" }
+rmp-serde = { workspace = true }
+
+[[test]]
+name = "ffi_roundtrip"
+path = "tests/ffi_roundtrip.rs"

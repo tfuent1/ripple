@@ -49,10 +49,10 @@ static ROUTER: OnceLock<Mutex<Router>> = OnceLock::new();
 
 // ── Return codes ──────────────────────────────────────────────────────────────
 
-const OK: i32 = 0;
-const ERR_NOT_INIT: i32 = -1;
-const ERR_SERIALIZE: i32 = -2;
-const ERR_INTERNAL: i32 = -3;
+pub const OK: i32 = 0;
+pub const ERR_NOT_INIT: i32 = -1;
+pub const ERR_SERIALIZE: i32 = -2;
+pub const ERR_INTERNAL: i32 = -3;
 
 // ── Helper: write an allocated buffer to out-params ───────────────────────────
 
