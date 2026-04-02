@@ -57,14 +57,21 @@ bundles on every relay cycle; duplicates are silently dropped.
 
 ## Known Gaps
 
-- **Bundle signature verification** — the server validates that bundles are
-  well-formed MessagePack but does not verify the Ed25519 signature. A client
-  can submit bundles with forged origin fields. Signature verification at the
-  HTTP boundary is a tracked hardening item for Milestone 1.8 / Phase 4.
 - **No authentication** — any client can submit bundles for any destination.
   Addressed in Phase 4 (Milestone 4.3).
 - **Rate limiting is in-memory** — resets on restart, not shared across
   multiple server instances. Sufficient for Phase 1.
+
+
+## Hardening (Phase 1 post-milestone)
+
+In addition to Milestone 1.8 changes above, the following was added during
+Phase 1 hardening:
+
+- **Bundle signature verification** — `Db::insert_bundle` now calls
+  `bundle.verify()` before storing. Bundles with invalid Ed25519 signatures
+  are rejected with `400 Bad Request`. Forged `origin` fields can no longer
+  be stored.
 
 ## Deployment
 ```bash

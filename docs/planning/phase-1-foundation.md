@@ -267,13 +267,13 @@ has at least one happy path and one failure path test. SQLite tests use
 **Integration tests** live in `core/tests/`. Key scenarios:
 ```
 tests/
-├── bundle_roundtrip.rs       — create, serialize, deserialize, verify
-├── encrypt_decrypt.rs        — encrypt to recipient, decrypt, verify contents
-├── spray_and_wait.rs         — spray count tracking, transition to waiting
-├── sos_epidemic.rs           — SOS bundles never stop forwarding
-├── bundle_expiry.rs          — expired bundles cleaned up on tick
-├── crdt_merge.rs             — merge commutativity, associativity, idempotency
-└── cli_e2e.rs                — two CLI nodes exchange a message end-to-end
+├── bundle_roundtrip.rs  ✅ — create, sign, serialize, deserialize, verify, tamper detection
+├── encrypt_decrypt.rs   ✅ — encrypt to recipient, decrypt, ADR-006 key type invariant, AEAD integrity
+├── spray_and_wait.rs    ✅ — three-node relay scenario, spray count state machine, SOS epidemic
+├── bundle_expiry.rs     ✅ — mesh_tick expiry, SOS survival, independent TTLs
+├── sos_epidemic.rs      — covered by spray_and_wait.rs and bundle_expiry.rs (not a separate file)
+├── crdt_merge.rs        — deferred; CRDT laws covered by unit tests in crdt.rs
+└── cli_e2e.rs           — deferred; requires spawning processes, not yet implemented
 ```
 
 **CI** runs on every push and pull request to `main` via GitHub Actions
@@ -290,7 +290,7 @@ tests/
 
 Phase 1 is complete when:
 
-1. `cargo test` passes with zero failures and zero warnings (54 tests, 95.4% coverage)
+1. `cargo test` passes with zero failures and zero warnings (97 tests, 95.8% line coverage)
 2. `cargo clippy -- -D warnings` passes clean
 3. Two `ripple daemon` instances can exchange an encrypted direct message
    through the rendezvous server

@@ -233,8 +233,6 @@ and remove or replace the offending dep.
 
 ## Future Improvements
 
-- Switch `cargo-deny` step to use the `EmbarkStudios/cargo-deny-action` GitHub
-  Action for faster installation via prebuilt binary (saves ~2 minutes on cold runs)
 - Add `cargo geiger` hard gate on `unsafe` count once the FFI surface stabilises
   after Phase 2 mobile integration — new `unsafe` outside `ffi/src/lib.rs` should
   require explicit review
