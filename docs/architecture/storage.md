@@ -40,7 +40,8 @@ concurrent read performance as the CLI and routing layer mature.
 | `dest_pubkey` | BLOB | X25519 recipient pubkey (NULL for Broadcast) |
 | `priority` | INTEGER | 0 = Normal, 1 = Urgent, 2 = SOS |
 | `expires_at` | INTEGER | Unix timestamp seconds, NULL for SOS |
-| `delivered` | INTEGER | 0 = pending, 1 = delivered |
+| `submitted` | INTEGER | 0 = not yet sent to relay, 1 = POSTed to rendezvous server |
+| `delivered`   | INTEGER | 0 = not yet processed, 1 = received and processed from relay |
 | `displayed` | INTEGER | 0 = not yet shown to user, 1 = printed to terminal |
 | `spray_remaining` | INTEGER | Spray and Wait copy count; NULL for SOS epidemic bundles |
 | `raw` | BLOB | Full MessagePack-serialized bundle |
@@ -73,10 +74,20 @@ to determine what to send them.
 SOS bundles are excluded by the `IS NOT NULL` guard. Returns the count of
 deleted bundles. Called by `mesh_tick` in `routing.rs`.
 
-**`all_undelivered`** — returns all bundles with `delivered = 0` regardless
-of destination. Used by the CLI relay loop to submit outbound bundles to the
-rendezvous server. A Phase 1 simplification — Phase 3 will add transport-aware
-filtering so bundles already within BLE range are not redundantly relayed.
+**`all_pending_submission`** — returns all bundles where `submitted = 0 AND
+delivered = 0`. Used by the CLI relay loop to find bundles that haven't yet
+been POSTed to the rendezvous server. A Phase 1 simplification — Phase 3 will
+add transport-aware filtering so bundles already synced over BLE are not
+redundantly relayed.
+
+**`mark_submitted(id)`** — sets `submitted = 1`. Called after a successful
+`POST /bundle` to the rendezvous server. Stops the bundle from being
+re-POSTed on the next relay cycle.
+
+**`mark_delivered(id)`** — sets `delivered = 1`. Called after a bundle has
+been received from the relay inbox and processed locally. Distinct from
+`mark_submitted` — a bundle moves through: submitted=0 → submitted=1 →
+delivered=1.
 
 **`mark_delivered(id)`** — sets `delivered = 1`. Called after the relay acks
 a bundle. Stops the bundle from being resubmitted to the rendezvous server.

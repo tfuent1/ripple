@@ -14,7 +14,9 @@ test without any platform dependencies.
 
 **Store ownership.** `Router` owns the `Store` by value. There is one Router per
 process, and it is the single point of access for all routing and persistence
-operations. CLI tooling that needs direct store access uses `Router::store()`.
+operations. All store interactions go through Router's public methods —
+`queue_outbound`, `get_bundle`, `mark_submitted`, `mark_delivered`, and so on.
+The store is not directly accessible outside the crate.
 
 **Spray count in SQLite.** Spray and Wait state is persisted in the `bundles` table
 rather than held in memory. This means spray counts survive process restarts, which
