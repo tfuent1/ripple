@@ -42,6 +42,19 @@ pub struct Store {
     conn: Connection,
 }
 
+/// Ordered list of SQL migrations, embedded at compile time from the
+/// `core/migrations/` directory via `include_str!`.
+///
+/// Rules:
+/// - Never modify an existing entry — it may already be applied to live databases.
+/// - To add a migration: create `NNN_description.sql` in `core/migrations/`
+///   and add a corresponding `include_str!` line here. The version number is
+///   derived automatically from position — no manual incrementing required.
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/001_initial_schema.sql"),
+    // include_str!("../migrations/002_your_next_migration.sql"),
+];
+
 impl Store {
     /// Open (or create) the SQLite database at `db_path`.
     /// Pass `":memory:"` in tests for a fast, isolated in-memory database.
@@ -56,59 +69,21 @@ impl Store {
         Ok(store)
     }
 
-    /// Create tables if they don't exist. Safe to run on every startup.
     fn migrate(&self) -> Result<(), StoreError> {
-        // WAL mode first — applies to all schema versions.
         self.conn.execute_batch("PRAGMA journal_mode = WAL;")?;
 
-        // Read current schema version. SQLite's user_version PRAGMA is an
-        // integer stored in the DB header — no extra table needed.
-        // It starts at 0 for new databases.
-        let version: u32 = self
+        let current_version: usize = self
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
-        // Each arm is additive — run only the migrations the DB still needs.
-        // Never modify a migration that has already shipped; always add a new one.
-        if version < 1 {
-            self.conn.execute_batch(
-                "
-                CREATE TABLE IF NOT EXISTS bundles (
-                    id               TEXT    PRIMARY KEY,
-                    destination      TEXT    NOT NULL,
-                    dest_pubkey      BLOB,
-                    priority         INTEGER NOT NULL,
-                    expires_at       INTEGER,
-                    delivered        INTEGER NOT NULL DEFAULT 0,
-                    displayed        INTEGER NOT NULL DEFAULT 0,
-                    spray_remaining  INTEGER,
-                    raw              BLOB    NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_bundles_dest_pubkey
-                    ON bundles (dest_pubkey) WHERE dest_pubkey IS NOT NULL;
-
-                CREATE INDEX IF NOT EXISTS idx_bundles_expires_at
-                    ON bundles (expires_at) WHERE expires_at IS NOT NULL;
-
-                CREATE TABLE IF NOT EXISTS encounters (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    peer_pubkey BLOB    NOT NULL,
-                    transport   INTEGER NOT NULL,
-                    rssi        INTEGER NOT NULL,
-                    seen_at     INTEGER NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_encounters_seen_at
-                    ON encounters (seen_at);
-
-                PRAGMA user_version = 1;
-            ",
-            )?;
+        for (i, sql) in MIGRATIONS.iter().enumerate() {
+            let migration_version = i + 1;
+            if current_version < migration_version {
+                self.conn.execute_batch(sql)?;
+                self.conn
+                    .execute_batch(&format!("PRAGMA user_version = {migration_version};"))?;
+            }
         }
-
-        // Future migrations follow the same pattern:
-        // if version < 2 { self.conn.execute_batch("ALTER TABLE ...; PRAGMA user_version = 2;")?; }
 
         Ok(())
     }
@@ -134,7 +109,7 @@ impl Store {
         let spray_remaining: Option<u8> = bundle.priority.spray_count();
 
         self.conn.execute(
-            "INSERT OR REPLACE INTO bundles
+            "INSERT OR IGNORE INTO bundles
                 (id, destination, dest_pubkey, priority, expires_at, spray_remaining, raw)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -657,5 +632,37 @@ mod tests {
         let pending = store.all_undelivered().unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, b2.id);
+    }
+
+    #[test]
+    fn test_duplicate_insert_does_not_reset_spray_count() {
+        let store = test_store();
+        let identity = Identity::generate();
+
+        let bundle = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(b"spray test".to_vec())
+            .build(&identity, NOW)
+            .unwrap();
+
+        let id = bundle.id;
+        store.insert_bundle(&bundle).unwrap();
+
+        // Decrement twice — spray_remaining goes from 6 to 4.
+        store.decrement_spray(id).unwrap();
+        store.decrement_spray(id).unwrap();
+
+        let after_decrement = store.decrement_spray(id).unwrap();
+        assert_eq!(after_decrement, Some(3));
+
+        // Re-inserting the same bundle (as would happen when a relay returns it)
+        // must NOT reset spray_remaining back to 6.
+        store.insert_bundle(&bundle).unwrap();
+
+        let after_reinsert = store.decrement_spray(id).unwrap();
+        assert_eq!(
+            after_reinsert,
+            Some(2),
+            "re-inserting a bundle must not reset its spray count"
+        );
     }
 }
