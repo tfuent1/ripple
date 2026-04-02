@@ -129,6 +129,15 @@ impl Router {
         // In all three cases, if bundles_for_peer returned the bundle,
         // we want to offer it. The spray decrement happens in
         // on_bundle_forwarded (called by native after actual transfer).
+        //
+        // TODO(M2): Broadcast bundles are NOT included in SyncOffers here.
+        // `bundles_for_peer` only matches on dest_pubkey, and broadcast
+        // bundles have no dest_pubkey — they sit in the store but are never
+        // actively forwarded peer-to-peer in Phase 1. The rendezvous relay
+        // is the only propagation mechanism for broadcasts right now.
+        // When BLE/WiFi Direct transports land, on_peer_encountered needs a
+        // second query that returns broadcast bundles still within their
+        // spray window, so they propagate across the mesh without internet.
         let bundle_ids = queued.iter().map(|b| b.id).collect();
 
         Ok(SyncOffer { bundle_ids })
