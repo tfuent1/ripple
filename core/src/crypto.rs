@@ -70,7 +70,16 @@ impl Identity {
         self.signing_key.sign(message).to_bytes()
     }
     pub(crate) fn to_x25519_secret(&self) -> StaticSecret {
-        StaticSecret::from(self.signing_key.to_bytes())
+        // `to_scalar_bytes()` performs SHA-512 expansion of the Ed25519 seed
+        // and returns the lower 32 bytes — the actual private scalar before clamping.
+        // `StaticSecret::from()` clamps it (per RFC 7748) when constructing the key.
+        //
+        // Using `self.signing_key.to_bytes()` (the raw seed) directly would bypass
+        // this expansion step, producing a key pair where the X25519 public key
+        // doesn't match what peers would compute — a silent, hard-to-debug mismatch.
+        //
+        // Requires the `hazmat` feature of ed25519-dalek.
+        StaticSecret::from(self.signing_key.to_scalar_bytes())
     }
 
     /// The X25519 public key derived from this identity.
@@ -222,5 +231,27 @@ mod tests {
         let restored = Identity::from_bytes(&private_bytes);
 
         assert_eq!(identity.public_key(), restored.public_key());
+    }
+
+    #[test]
+    fn test_x25519_public_key_matches_montgomery_point() {
+        // Verify that our X25519 public key derivation is consistent with
+        // the Ed25519 verifying key's Montgomery form.
+        //
+        // `verifying_key().to_montgomery()` is the authoritative source for
+        // what the X25519 public key *should* be for a given Ed25519 identity.
+        // If our `to_x25519_secret` were wrong (e.g., using the raw seed instead
+        // of the expanded scalar), this test would catch the mismatch.
+        let identity = Identity::generate();
+        let derived_x25519_pub = identity.x25519_public_key();
+        let canonical_montgomery = identity
+            .signing_key
+            .verifying_key()
+            .to_montgomery()
+            .to_bytes();
+        assert_eq!(
+            derived_x25519_pub, canonical_montgomery,
+            "X25519 public key must match the Ed25519 verifying key's Montgomery form"
+        );
     }
 }
