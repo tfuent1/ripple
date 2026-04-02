@@ -66,7 +66,9 @@ impl Db {
     /// already present (INSERT OR IGNORE).
     pub fn insert_bundle(&self, raw: &[u8]) -> Result<bool, DbError> {
         let bundle = Bundle::from_bytes(raw).map_err(|e| DbError::BundleParse(e.to_string()))?;
-        bundle.verify().map_err(|e| DbError::BundleParse(e.to_string()))?;
+        bundle
+            .verify()
+            .map_err(|e| DbError::BundleParse(e.to_string()))?;
 
         let dest_pubkey_hex = match &bundle.destination {
             Destination::Peer(pk) => hex::encode(pk),

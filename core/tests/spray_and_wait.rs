@@ -69,9 +69,7 @@ fn alice_creates_bob_relays_charlie_receives() {
     let bundle_bytes = bundle.to_bytes().unwrap();
     let received_bundle = ripple_core::bundle::Bundle::from_bytes(&bundle_bytes).unwrap();
 
-    let actions = bob_router
-        .on_bundle_received(received_bundle, NOW)
-        .unwrap();
+    let actions = bob_router.on_bundle_received(received_bundle, NOW).unwrap();
 
     // Bundle is for Charlie, not Bob — no NotifyUser.
     assert!(
@@ -102,11 +100,7 @@ fn alice_creates_bob_relays_charlie_receives() {
     );
 
     // ── Step 6: Charlie receives the bundle from Bob ───────────────────────
-    let bundle_for_charlie = bob_router
-        .store()
-        .get_bundle(bundle_id)
-        .unwrap()
-        .unwrap();
+    let bundle_for_charlie = bob_router.store().get_bundle(bundle_id).unwrap().unwrap();
 
     let charlie_bytes = bundle_for_charlie.to_bytes().unwrap();
     let final_bundle = ripple_core::bundle::Bundle::from_bytes(&charlie_bytes).unwrap();
@@ -159,13 +153,10 @@ fn normal_bundle_starts_with_spray_count_6() {
     let bob = Identity::generate();
     let router = make_router(&alice);
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Normal,
-    )
-    .payload(b"normal".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+        .payload(b"normal".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     let bundle_id = bundle.id;
     router.store().insert_bundle(&bundle).unwrap();
@@ -181,13 +172,10 @@ fn urgent_bundle_starts_with_spray_count_20() {
     let bob = Identity::generate();
     let router = make_router(&alice);
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Urgent,
-    )
-    .payload(b"urgent".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Urgent)
+        .payload(b"urgent".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     let bundle_id = bundle.id;
     router.store().insert_bundle(&bundle).unwrap();
@@ -248,13 +236,10 @@ fn receiving_duplicate_bundle_is_idempotent() {
     let bob = Identity::generate();
     let mut router = make_router(&bob);
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Normal,
-    )
-    .payload(b"once".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+        .payload(b"once".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     let bundle_id = bundle.id;
     let bytes = bundle.to_bytes().unwrap();

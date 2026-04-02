@@ -43,13 +43,10 @@ fn direct_message_bundle_survives_roundtrip() {
     let alice = Identity::generate();
     let bob = Identity::generate();
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Urgent,
-    )
-    .payload(b"private message".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Urgent)
+        .payload(b"private message".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     let bytes = bundle.to_bytes().unwrap();
     let restored = Bundle::from_bytes(&bytes).unwrap();
@@ -176,13 +173,11 @@ fn tampered_destination_fails_verification() {
     let bob = Identity::generate();
     let eve = Identity::generate();
 
-    let mut bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Normal,
-    )
-    .payload(b"for bob".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let mut bundle =
+        BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+            .payload(b"for bob".to_vec())
+            .build(&alice, NOW)
+            .unwrap();
 
     // Redirect to Eve's pubkey — must fail signature check.
     bundle.destination = Destination::Peer(eve.x25519_public_key());

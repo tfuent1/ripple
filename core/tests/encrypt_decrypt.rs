@@ -74,8 +74,7 @@ fn eve_cannot_decrypt_message_intended_for_bob() {
     let bob = Identity::generate();
     let eve = Identity::generate();
 
-    let ciphertext =
-        crypto::encrypt(&alice, &bob.x25519_public_key(), b"for bob only").unwrap();
+    let ciphertext = crypto::encrypt(&alice, &bob.x25519_public_key(), b"for bob only").unwrap();
 
     // Eve tries to decrypt using her own private key — must fail.
     let result = crypto::decrypt(&eve, &alice.x25519_public_key(), &ciphertext);
@@ -93,8 +92,7 @@ fn wrong_sender_key_fails_decryption() {
     let bob = Identity::generate();
     let eve = Identity::generate();
 
-    let ciphertext =
-        crypto::encrypt(&alice, &bob.x25519_public_key(), b"from alice").unwrap();
+    let ciphertext = crypto::encrypt(&alice, &bob.x25519_public_key(), b"from alice").unwrap();
 
     // Bob tries to decrypt claiming sender is Eve.
     let result = crypto::decrypt(&bob, &eve.x25519_public_key(), &ciphertext);
@@ -118,8 +116,7 @@ fn using_ed25519_key_where_x25519_expected_fails_decryption() {
     let alice = Identity::generate();
     let bob = Identity::generate();
 
-    let ciphertext =
-        crypto::encrypt(&alice, &bob.x25519_public_key(), b"secret").unwrap();
+    let ciphertext = crypto::encrypt(&alice, &bob.x25519_public_key(), b"secret").unwrap();
 
     // Pass Alice's Ed25519 pubkey where her X25519 pubkey is required.
     // These are different curve encodings of the same scalar — this is the
@@ -155,18 +152,14 @@ fn flipped_bit_in_ciphertext_fails_decryption() {
     let alice = Identity::generate();
     let bob = Identity::generate();
 
-    let mut ciphertext =
-        crypto::encrypt(&alice, &bob.x25519_public_key(), b"authentic").unwrap();
+    let mut ciphertext = crypto::encrypt(&alice, &bob.x25519_public_key(), b"authentic").unwrap();
 
     // Flip a bit in the ciphertext body (past the 12-byte nonce).
     let body_idx = 12;
     ciphertext[body_idx] ^= 0xFF;
 
     let result = crypto::decrypt(&bob, &alice.x25519_public_key(), &ciphertext);
-    assert!(
-        result.is_err(),
-        "AEAD must reject tampered ciphertext"
-    );
+    assert!(result.is_err(), "AEAD must reject tampered ciphertext");
 }
 
 // ── End-to-end: bundle encryption matches crypto layer ────────────────────────
@@ -182,17 +175,13 @@ fn bundle_encrypt_decrypt_matches_crypto_layer() {
 
     let plaintext = b"end to end";
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Normal,
-    )
-    .payload(plaintext.to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+        .payload(plaintext.to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     // bundle.payload is the raw AEAD output — decrypt it directly.
-    let recovered =
-        crypto::decrypt(&bob, &alice.x25519_public_key(), &bundle.payload).unwrap();
+    let recovered = crypto::decrypt(&bob, &alice.x25519_public_key(), &bundle.payload).unwrap();
 
     assert_eq!(recovered, plaintext);
 }
@@ -205,17 +194,13 @@ fn bundle_origin_x25519_is_correct_sender_key_for_decryption() {
     let alice = Identity::generate();
     let bob = Identity::generate();
 
-    let bundle = BundleBuilder::new(
-        Destination::Peer(bob.x25519_public_key()),
-        Priority::Normal,
-    )
-    .payload(b"verify the field".to_vec())
-    .build(&alice, NOW)
-    .unwrap();
+    let bundle = BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
+        .payload(b"verify the field".to_vec())
+        .build(&alice, NOW)
+        .unwrap();
 
     // This is exactly what the daemon does on NotifyUser.
-    let recovered =
-        crypto::decrypt(&bob, &bundle.origin_x25519, &bundle.payload).unwrap();
+    let recovered = crypto::decrypt(&bob, &bundle.origin_x25519, &bundle.payload).unwrap();
 
     assert_eq!(recovered, b"verify the field");
 
