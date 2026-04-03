@@ -1,0 +1,38 @@
+name: Dependency freshness
+
+on:
+  schedule:
+    # First day of each month at 09:00 UTC
+    - cron: "0 9 1 * *"
+  workflow_dispatch: # allow manual trigger from GitHub Actions UI
+
+jobs:
+  outdated:
+    name: Check outdated dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-outdated-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-outdated-
+
+      - name: Install cargo-outdated
+        run: cargo install cargo-outdated
+
+      - name: Check for outdated dependencies
+        # --exit-code 1 makes the job fail if anything is outdated.
+        # Remove it if you want the report without a failing check —
+        # useful while you're still deciding what to upgrade.
+        run: cargo outdated --workspace --exit-code 1

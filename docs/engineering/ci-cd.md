@@ -84,6 +84,21 @@ cargo test --all
 Runs unit tests across every crate in the workspace. SQLite tests use
 `:memory:` — no filesystem side effects, no cleanup required.
 
+### Dependency freshness (scheduled)
+```bash
+cargo outdated --workspace --exit-code 1
+```
+
+Runs on a monthly schedule via `.github/workflows/outdated.yml`, not on
+every push. Reports dependencies where a newer version is available within
+the current semver constraint (`Compat` column) or as a breaking update
+(`Latest` column). A failing check means at least one direct dependency
+has a compatible update available — review and upgrade deliberately rather
+than automatically.
+
+Run manually at any time from the GitHub Actions UI via `workflow_dispatch`,
+or locally with `cargo outdated --workspace`.
+
 ### Deny check
 
 ```bash
@@ -234,8 +249,6 @@ and remove or replace the offending dep.
 - Add `cargo geiger` hard gate on `unsafe` count once the FFI surface stabilises
   after Phase 2 mobile integration — new `unsafe` outside `ffi/src/lib.rs` should
   require explicit review
-- Add `cargo outdated` as a scheduled monthly workflow (separate from CI) to
-  surface available dependency updates without blocking every push
 - Promote `bans.multiple-versions` from `"warn"` to `"deny"` once the
   remaining `getrandom` duplicate resolves — this requires `rand 0.10`
   (getrandom 0.4) and the dalek crypto crates releasing `rand_core 0.10`
