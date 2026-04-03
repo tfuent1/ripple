@@ -196,7 +196,7 @@ deny = [
 # duplicate is unavoidable and you've verified no type boundary is shared
 # between the two versions.
 skip = [
-    { crate = "getrandom@0.2.17", reason = "rand 0.8 requires getrandom 0.2; uuid requires 0.4" },
+    { crate = "getrandom@0.2.17", reason = "rand 0.8 requires getrandom 0.2; uuid requires 0.4. Resolves when rand upgrades to 0.10 and dalek crates support rand_core 0.10." },
 ]
 
 # skip-tree — like skip, but also skips all transitive dependencies of the

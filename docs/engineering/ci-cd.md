@@ -237,4 +237,6 @@ and remove or replace the offending dep.
 - Add `cargo outdated` as a scheduled monthly workflow (separate from CI) to
   surface available dependency updates without blocking every push
 - Promote `bans.multiple-versions` from `"warn"` to `"deny"` once the
-  remaining `getrandom` duplicate resolves with a `rand 0.9` upgrade
+  remaining `getrandom` duplicate resolves — this requires `rand 0.10`
+  (getrandom 0.4) and the dalek crypto crates releasing `rand_core 0.10`
+  support. Watch `ed25519-dalek` and `x25519-dalek` release notes.
