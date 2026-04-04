@@ -13,7 +13,7 @@ use ripple_ffi::{
     mesh_bundle_received, mesh_create_bundle, mesh_free, mesh_init, mesh_tick, ERR_NOT_INIT, OK,
 };
 
-fn init() -> [u8; 32] {
+fn init() -> ripple_core::crypto::Identity {
     let identity = ripple_core::crypto::Identity::generate();
     let private_bytes = identity.to_private_bytes();
     let db_path = ":memory:";
@@ -27,7 +27,10 @@ fn init() -> [u8; 32] {
         )
     };
     assert_eq!(rc, OK, "mesh_init must return OK on first call");
-    private_bytes
+
+    // Return the identity so the test can derive the same public keys
+    // that the IDENTITY singleton holds — useful for verifying bundle origin.
+    identity
 }
 
 fn unwrap_msgpack_bytes(ptr: *mut u8, len: usize) -> Vec<u8> {
@@ -38,12 +41,11 @@ fn unwrap_msgpack_bytes(ptr: *mut u8, len: usize) -> Vec<u8> {
 
 #[test]
 fn full_ffi_roundtrip() {
-    let _private_bytes = init();
+    let node_identity = init();
 
-    // Create a bundle from a fresh sender to a fresh recipient.
-    let sender = ripple_core::crypto::Identity::generate();
+    // The singleton was initialized with node_identity. mesh_create_bundle
+    // will sign with that identity — no private bytes needed at call time.
     let recipient = ripple_core::crypto::Identity::generate();
-    let private_bytes = sender.to_private_bytes();
     let dest = recipient.x25519_public_key();
     let payload = b"full ffi roundtrip";
     let now: i64 = 1_700_000_000;
@@ -53,8 +55,6 @@ fn full_ffi_roundtrip() {
 
     let rc = unsafe {
         mesh_create_bundle(
-            private_bytes.as_ptr(),
-            private_bytes.len(),
             dest.as_ptr(),
             payload.as_ptr(),
             payload.len(),
@@ -74,6 +74,14 @@ fn full_ffi_roundtrip() {
     bundle
         .verify()
         .expect("created bundle must have valid signature");
+
+    // The bundle's origin must be the node identity loaded at mesh_init,
+    // not some ad-hoc identity — this is what ADR-008 Option C guarantees.
+    assert_eq!(
+        bundle.origin,
+        node_identity.public_key(),
+        "bundle origin must match the identity passed to mesh_init"
+    );
 
     // Hand it to on_bundle_received.
     let mut out_actions: *mut u8 = std::ptr::null_mut();

@@ -2,9 +2,17 @@
 //!
 //! ## Design
 //!
-//! The Router (which owns Store and PeerManager) lives in a process-global
-//! `OnceLock<Mutex<Router>>`. `mesh_init` initializes it once. Every other
-//! function locks it, does work, and returns.
+//! Two process-global singletons are initialized by `mesh_init`:
+//!
+//! - `IDENTITY` — holds the node's `Identity` (Ed25519 signing key + derived
+//!   X25519 keypair). Used by `mesh_create_bundle` for signing. Never stored
+//!   in the Router. See ADR-008.
+//! - `ROUTER` — holds the `Router` (owns Store and PeerManager). Used by all
+//!   routing and persistence functions.
+//!
+//! **Lock ordering rule:** If a future function needs both singletons, acquire
+//! `IDENTITY` first, complete signing, release the `IDENTITY` lock, then
+//! acquire `ROUTER`. Never hold both locks simultaneously.
 //!
 //! ## Memory contract
 //!
@@ -46,6 +54,19 @@ use uuid::Uuid;
 ///
 /// In PHP terms: this is a process-level singleton with a lock around it.
 static ROUTER: OnceLock<Mutex<Router>> = OnceLock::new();
+
+/// The process-global Identity singleton.
+///
+/// Initialized once by `mesh_init` alongside the Router. Holds the full
+/// `Identity` struct (Ed25519 signing key + derived X25519 keypair) so
+/// `mesh_create_bundle` and any future signing operations can access it
+/// without re-deriving from raw bytes on every call.
+///
+/// **Lock ordering rule:** Never hold both IDENTITY and ROUTER locks at the
+/// same time. If a future function needs both, acquire IDENTITY first, complete
+/// the signing work, drop the IDENTITY lock, then acquire ROUTER. Violating
+/// this rule risks deadlock as the codebase grows.
+static IDENTITY: OnceLock<Mutex<Identity>> = OnceLock::new();
 
 // ── Return codes ──────────────────────────────────────────────────────────────
 
@@ -146,12 +167,21 @@ pub unsafe extern "C" fn mesh_init(
 
     let router = Router::new(store, x25519_pubkey);
 
-    // `set` returns Err if already initialized — that's fine, we just
-    // return ERR_NOT_INIT to tell the caller they called init twice.
-    match ROUTER.set(Mutex::new(router)) {
-        Ok(_) => OK,
-        Err(_) => ERR_NOT_INIT,
+    // Initialize IDENTITY first — lock ordering rule requires IDENTITY is
+    // acquired before ROUTER if both are ever needed in the same call path.
+    //
+    // **Rust note:** `identity` is moved into `IDENTITY.set()` here. After
+    // this line the local variable no longer exists — the OnceLock owns it.
+    // There is exactly one copy of the Identity in the process.
+    if IDENTITY.set(Mutex::new(identity)).is_err() {
+        return ERR_NOT_INIT;
     }
+
+    if ROUTER.set(Mutex::new(router)).is_err() {
+        return ERR_NOT_INIT;
+    }
+
+    OK
 }
 
 // ── mesh_peer_encountered ─────────────────────────────────────────────────────
@@ -372,35 +402,25 @@ pub unsafe extern "C" fn mesh_bundles_for_peer(
 
 /// Create, sign, and store a new outbound bundle.
 ///
-/// `dest_pubkey`  — 32 bytes for Peer destination, NULL for Broadcast
-/// `payload`      — raw payload bytes
+/// Uses the identity loaded at `mesh_init` — the private key is never passed
+/// over the FFI boundary here. See ADR-008 (Option C).
+///
+/// `dest_pubkey`    — 32-byte X25519 pubkey for Peer destination, NULL for Broadcast
+/// `payload`        — raw payload bytes
 /// `payload_len`
-/// `priority`     — 0=Normal, 1=Urgent, 2=SOS
-/// `now`          — current Unix timestamp in seconds
-/// `out_bundle`   — written with pointer to MessagePack-serialized Bundle
+/// `priority`       — 0=Normal, 1=Urgent, 2=SOS
+/// `now`            — current Unix timestamp in seconds
+/// `out_bundle`     — written with pointer to MessagePack-serialized Bundle
 /// `out_bundle_len`
 ///
 /// Caller must call `mesh_free` when done.
 ///
 /// # Safety
-/// `identity_bytes` must be a valid pointer to 32 bytes.
 /// `dest_pubkey` must be a valid pointer to 32 bytes, or NULL for Broadcast.
 /// `payload` must be a valid pointer to `payload_len` bytes.
 /// `out_bundle` and `out_bundle_len` must be valid writable pointers.
-///
-/// **Note:** This function needs the Identity to sign the bundle, but the
-/// Identity is not stored in the Router (the private key must not live in
-/// a Mutex accessible to arbitrary FFI callers in a real deployment).
-/// For Phase 1, we re-derive it from scratch — Phase 2 will add a proper
-/// identity parameter here or a separate identity accessor.
-///
-/// For now: this function takes the 32-byte private key directly so the
-/// CLI can call it. The private key is zeroed from the stack when the
-/// function returns.
 #[no_mangle]
 pub unsafe extern "C" fn mesh_create_bundle(
-    identity_bytes: *const u8,
-    identity_len: usize,
     dest_pubkey: *const u8, // NULL for Broadcast
     payload: *const u8,
     payload_len: usize,
@@ -409,22 +429,15 @@ pub unsafe extern "C" fn mesh_create_bundle(
     out_bundle: *mut *mut u8,
     out_bundle_len: *mut usize,
 ) -> i32 {
-    let router_mutex = match ROUTER.get() {
+    let identity_mutex = match IDENTITY.get() {
         Some(m) => m,
         None => return ERR_NOT_INIT,
     };
 
-    if identity_len != 32 || identity_bytes.is_null() {
-        return ERR_INTERNAL;
-    }
-
-    let id_arr: zeroize::Zeroizing<[u8; 32]> = unsafe {
-        match std::slice::from_raw_parts(identity_bytes, 32).try_into() {
-            Ok(a) => zeroize::Zeroizing::new(a),
-            Err(_) => return ERR_INTERNAL,
-        }
+    let router_mutex = match ROUTER.get() {
+        Some(m) => m,
+        None => return ERR_NOT_INIT,
     };
-    let identity = Identity::from_bytes(&id_arr);
 
     let destination = if dest_pubkey.is_null() {
         Destination::Broadcast
@@ -447,19 +460,35 @@ pub unsafe extern "C" fn mesh_create_bundle(
 
     let payload_slice = unsafe { std::slice::from_raw_parts(payload, payload_len) };
 
-    let bundle = match BundleBuilder::new(destination, priority)
-        .payload(payload_slice.to_vec())
-        .build(&identity, now)
-    {
-        Ok(b) => b,
-        Err(_) => return ERR_INTERNAL,
+    // Lock ordering rule: acquire IDENTITY, sign, release — then acquire ROUTER.
+    // The inner { } block is what enforces this. The MutexGuard is dropped at
+    // the closing brace, releasing the lock before ROUTER is ever touched.
+    //
+    // **Rust note:** `&*identity` looks odd but is the standard idiom.
+    // `identity` is a MutexGuard<Identity>. `*identity` dereferences the guard
+    // to get the Identity value. `&` then borrows it. `.build()` expects
+    // `&Identity` — this is how you get one out of a guard.
+    let bundle = {
+        let identity = match identity_mutex.lock() {
+            Ok(g) => g,
+            Err(_) => return ERR_INTERNAL,
+        };
+        match BundleBuilder::new(destination, priority)
+            .payload(payload_slice.to_vec())
+            .build(&identity, now)
+        {
+            Ok(b) => b,
+            Err(_) => return ERR_INTERNAL,
+        }
+        // `identity` (the MutexGuard) is dropped here — IDENTITY lock released.
     };
 
-    // Store it so it gets forwarded when peers are encountered.
+    // IDENTITY lock is released. Now safe to acquire ROUTER.
     let router = match router_mutex.lock() {
         Ok(r) => r,
         Err(_) => return ERR_INTERNAL,
     };
+
     if router.queue_outbound(&bundle).is_err() {
         return ERR_INTERNAL;
     }
@@ -469,7 +498,6 @@ pub unsafe extern "C" fn mesh_create_bundle(
         Err(_) => return ERR_SERIALIZE,
     };
 
-    // Wrap in a Vec so write_output serializes consistently with other outputs.
     write_output(&bytes, out_bundle, out_bundle_len)
 }
 

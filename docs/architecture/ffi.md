@@ -12,10 +12,12 @@ through the core, and returns outputs. No callbacks cross the boundary in
 either direction. Native calls a function, gets a result, executes any
 returned Actions, and moves on.
 
-**Process-global singleton.** The Router (which owns Store and PeerManager)
-lives in a `OnceLock<Mutex<Router>>`. `mesh_init` sets it once. All other
-functions lock it, call into the core, and release. There is no context
-pointer — the C side is stateless.
+**Process-global singletons.** Two singletons are initialized by `mesh_init`:
+`IDENTITY` (holds the node's `Identity` — Ed25519 signing key and derived
+X25519 keypair) and `ROUTER` (holds the `Router`, which owns Store and
+PeerManager). Lock ordering rule: always acquire `IDENTITY` before `ROUTER`
+if both are needed in the same call path. In practice no current function
+needs both. There is no context pointer — the C side is stateless.
 
 **MessagePack over the boundary.** All structured outputs are serialized to
 MessagePack before being written to the caller's out-pointer. The caller
@@ -140,8 +142,6 @@ send over the transport. Caller must `mesh_free` when done.
 ### `mesh_create_bundle`
 ```c
 int32_t mesh_create_bundle(
-    const uint8_t *identity_bytes,
-    uintptr_t      identity_len,
     const uint8_t *dest_pubkey,
     const uint8_t *payload,
     uintptr_t      payload_len,
@@ -152,11 +152,9 @@ int32_t mesh_create_bundle(
 );
 ```
 
-Creates, signs, stores, and returns a new outbound bundle.
-
-`identity_bytes` — 32-byte Ed25519 private key. The private key does not
-live in the Router — it must be passed on each call. The caller is
-responsible for holding it securely (iOS Keychain, Android Keystore).
+Creates, signs, stores, and returns a new outbound bundle. Signs using the
+identity loaded at `mesh_init` — the private key is never passed over the
+FFI boundary after initialization. See ADR-008 (Option C).
 
 `dest_pubkey` — 32-byte X25519 pubkey of the recipient for a direct
 message, or NULL for a broadcast bundle. **Must be X25519, not Ed25519.**
@@ -262,9 +260,9 @@ written before the error was detected.
 
 - `cbindgen` header generation deferred to Phase 2. For now, callers
   maintain their own header or use the function signatures above directly.
-- The `identity_bytes` parameter on `mesh_create_bundle` is a Phase 1
-  pragmatism. Phase 2 will evaluate whether to add a separate
-  identity-holding layer or pass the key on each call consistently.
+- `mesh_create_bundle` uses the `IDENTITY` singleton initialized at
+  `mesh_init`. The private key is never passed over the FFI boundary
+  after startup. See ADR-008 (Option C, adopted Phase 2).
 - A `mesh_decrypt_bundle` function will be needed in Phase 2 when the
   native layer needs to display received direct messages to the user.
   The CLI handles this directly via `crypto::decrypt` without going through
