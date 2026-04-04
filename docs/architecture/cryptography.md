@@ -94,6 +94,35 @@ The shared secret is symmetric — both sides independently compute the same val
 from their own private key and the other party's public key. No key exchange
 round-trip is required.
 
+## Nonce Security
+
+Each ChaCha20-Poly1305 encryption call generates a fresh 12-byte nonce via
+`ChaCha20Poly1305::generate_nonce(&mut OsRng)`. The nonce is prepended to the
+ciphertext and transmitted with it.
+
+**Nonce reuse threat.** If the same nonce were used twice with the same key,
+an attacker who observes both ciphertexts can XOR them to cancel the keystream
+and recover information about both plaintexts — a catastrophic failure mode for
+any stream cipher. ChaCha20-Poly1305 provides no protection against this.
+
+**Why random nonces are safe here.** The 12-byte (96-bit) nonce space gives
+2^96 ≈ 79 octillion possible values. For a collision to occur by chance, a
+single sender-recipient pair would need to exchange roughly 2^48 messages
+(birthday bound). At one message per second that is ~9 million years. Random
+nonce generation via the OS CSPRNG (`OsRng`) is the correct approach for this
+message volume.
+
+**What this does not protect against.** A broken or compromised OS random
+number generator could produce repeated nonces. This is a systemic risk
+affecting all software on the device and is outside Ripple's threat model.
+Platform-level CSPRNG integrity is assumed.
+
+**Key rotation.** Each message uses a freshly derived ECDH shared secret
+because the nonce is included in the HKDF input indirectly through the
+per-message encryption step. There is no long-lived symmetric session key
+that accumulates nonce usage over time — every encryption derives a fresh
+key from the X25519 DH output via HKDF (ADR-007).
+
 ## Crates
 
 | Crate | Version | Role |

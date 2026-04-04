@@ -9,3 +9,5 @@
 | [ADR-005](./ADR-005-pure-rust-crypto.md) | Pure Rust crypto — no libsodium | Accepted |
 | [ADR-006](./ADR-006-two-key-identity.md) | Two-key identity model | Accepted |
 | [ADR-007](./ADR-007-hkdf-key-derivation.md) | HKDF key derivation from X25519 output | Accepted |
+| [ADR-008](./ADR-008-ffi-identity-passing.md) | FFI identity passing strategy | Accepted |
+| [ADR-009](./ADR-009-rate-limiter-design.md) | Rendezvous rate limiter design | Accepted |
