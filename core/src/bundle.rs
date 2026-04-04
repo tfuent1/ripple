@@ -360,7 +360,7 @@ mod tests {
         bundle.verify().unwrap();
     }
 
-        #[test]
+    #[test]
     fn test_payload_too_large_rejected() {
         let identity = Identity::generate();
         // One byte over the limit.
@@ -386,6 +386,9 @@ mod tests {
             .payload(at_limit)
             .build(&identity, NOW);
 
-        assert!(result.is_ok(), "payload exactly at the limit must be accepted");
+        assert!(
+            result.is_ok(),
+            "payload exactly at the limit must be accepted"
+        );
     }
 }
