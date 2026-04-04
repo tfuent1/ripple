@@ -16,8 +16,9 @@ returned Actions, and moves on.
 `IDENTITY` (holds the node's `Identity` — Ed25519 signing key and derived
 X25519 keypair) and `ROUTER` (holds the `Router`, which owns Store and
 PeerManager). Lock ordering rule: always acquire `IDENTITY` before `ROUTER`
-if both are needed in the same call path. In practice no current function
-needs both. There is no context pointer — the C side is stateless.
+if both are needed in the same call path — no function may hold both locks
+simultaneously. In practice no current function needs both. There is no
+context pointer — the C side is stateless. See ADR-008.
 
 **MessagePack over the boundary.** All structured outputs are serialized to
 MessagePack before being written to the caller's out-pointer. The caller
