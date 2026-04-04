@@ -3,6 +3,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Maximum allowed payload size in bytes.
+///
+/// Enforced by `BundleBuilder::build()` before signing, so every transport
+/// gets this limit for free — not just the rendezvous HTTP layer.
+/// 64 KB is generous for text messages while keeping Spray-and-Wait
+/// feasible on BLE (which tops out around 200 Kbps).
+/// Images, voice, and file transfer require chunked out-of-band transfer
+/// and are out of scope until Phase 5.
+pub const MAX_PAYLOAD_BYTES: usize = 65_536;
+
 // ── Error type ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Error)]
@@ -21,6 +31,9 @@ pub enum BundleError {
 
     #[error("bundle has expired")]
     Expired,
+
+    #[error("payload too large: {size} bytes exceeds the {MAX_PAYLOAD_BYTES}-byte limit")]
+    PayloadTooLarge { size: usize },
 }
 
 // ── Priority ──────────────────────────────────────────────────────────────────
@@ -190,6 +203,13 @@ impl BundleBuilder {
     /// parameter rather than calling the system clock internally — this keeps
     /// the core deterministic and easy to test.
     pub fn build(self, identity: &Identity, now_secs: i64) -> Result<Bundle, BundleError> {
+        // Reject oversized payloads before doing any crypto work.
+        if self.payload.len() > MAX_PAYLOAD_BYTES {
+            return Err(BundleError::PayloadTooLarge {
+                size: self.payload.len(),
+            });
+        }
+
         let expires_at = self.priority.ttl_seconds().map(|ttl| now_secs + ttl);
 
         // Encrypt payload for direct messages.
@@ -338,5 +358,34 @@ mod tests {
 
         // Signature must still be valid after hop count changes.
         bundle.verify().unwrap();
+    }
+
+        #[test]
+    fn test_payload_too_large_rejected() {
+        let identity = Identity::generate();
+        // One byte over the limit.
+        let oversized = vec![0u8; MAX_PAYLOAD_BYTES + 1];
+
+        let result = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(oversized)
+            .build(&identity, NOW);
+
+        assert!(
+            matches!(result, Err(BundleError::PayloadTooLarge { .. })),
+            "oversized payload must be rejected before signing"
+        );
+    }
+
+    #[test]
+    fn test_payload_at_limit_accepted() {
+        let identity = Identity::generate();
+        // Exactly at the limit must succeed.
+        let at_limit = vec![0u8; MAX_PAYLOAD_BYTES];
+
+        let result = BundleBuilder::new(Destination::Broadcast, Priority::Normal)
+            .payload(at_limit)
+            .build(&identity, NOW);
+
+        assert!(result.is_ok(), "payload exactly at the limit must be accepted");
     }
 }

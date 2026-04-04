@@ -8,6 +8,7 @@
 //! Using a real server rather than a mock catches actual HTTP encoding issues
 //! (base64, status codes, JSON shape) that mocks tend to hide.
 
+use ripple_cli::utils::unix_now;
 use ripple_core::bundle::{Bundle, BundleBuilder, Destination, Priority};
 use ripple_core::crypto::Identity;
 use ripple_rendezvous::db::Db;
@@ -55,19 +56,11 @@ async fn spawn_server() -> String {
     panic!("rendezvous server did not become ready within 200ms");
 }
 
-/// Get current time
-fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-}
-
 /// Build a signed bundle from `sender` to `recipient_x25519` for use in tests.
 fn make_bundle(sender: &Identity, recipient_x25519: [u8; 32]) -> Vec<u8> {
     BundleBuilder::new(Destination::Peer(recipient_x25519), Priority::Normal)
         .payload(b"relay integration test".to_vec())
-        .build(sender, now())
+        .build(sender, unix_now())
         .unwrap()
         .to_bytes()
         .unwrap()
@@ -200,7 +193,7 @@ async fn server_rejects_tampered_bundle() {
     let mut bundle =
         BundleBuilder::new(Destination::Peer(bob.x25519_public_key()), Priority::Normal)
             .payload(b"legitimate".to_vec())
-            .build(&alice, now())
+            .build(&alice, unix_now())
             .unwrap();
     bundle.payload = b"tampered".to_vec();
     let tampered_bytes = bundle.to_bytes().unwrap();

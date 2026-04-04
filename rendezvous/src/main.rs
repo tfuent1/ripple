@@ -12,6 +12,7 @@ use clap::Parser;
 use db::Db;
 use server::AppState;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing::info;
 
 // ── CLI flags ─────────────────────────────────────────────────────────────────
@@ -63,6 +64,26 @@ async fn main() {
     let db = Db::open(&db_path).expect("failed to open database");
 
     let state = AppState::new(db, args.max_bundle_kb * 1024);
+
+    // Background sweep: expire stale bundles every 5 minutes.
+    // The lazy expiry in 'bundles_for_pubkey' handles active inboxes,
+    // but nodes that go offline leave bundles that are never polled.
+    // This sweep cleans those up regardless of traffic.
+    let sweep_db = Arc::clone(&state.db);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let count = {
+                let db = sweep_db.lock().unwrap();
+                db.expire_bundles().unwrap_or(0)
+            };
+            if count > 0 {
+                tracing::info!("sweep: expired {count} stale bundle(s)");
+            }
+        }
+    });
+
     let router = server::build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));

@@ -118,6 +118,20 @@ impl Db {
         Ok(rows)
     }
 
+    /// Delete all expired buncles. Called periodically by the background sweep task.
+    ///
+    /// SOS bundles have 'expires_at = NULL' and are never touched
+    /// Returns the number of rows deleted
+    pub fn expire_bundles(&self) -> Result<u32, DbError> {
+        let count = self.conn.execute(
+            "DELETE FROM bundles
+            WHERE expires_at IS NOT NULL
+            AND expires_at <= strftime('%s', 'now')",
+            [],
+        )?;
+        Ok(count as u32)
+    }
+
     /// Delete a bundle by its UUID string. Used to acknowledge delivery.
     pub fn delete_bundle(&self, bundle_id: &str) -> Result<(), DbError> {
         self.conn
@@ -233,6 +247,51 @@ mod tests {
         let db = Db::open(":memory:").unwrap();
         let rows = db.bundles_for_pubkey(&hex::encode([99u8; 32])).unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn expire_bundles_removes_stale() {
+        // This test uses a bundle built with a timestamp far in the past so
+        // its expires_at is already behind strftime('%s','now') at insert time.
+        // We bypass insert_bundle (which would still store it) and insert
+        // directly with an explicit past expires_at to simulate a stale entry.
+        let db = Db::open(":memory:").unwrap();
+
+        // Insert a row that expired at Unix timestamp 1 (Jan 1 1970 + 1s).
+        db.conn
+            .execute(
+                "INSERT INTO bundles (id, dest_pubkey, raw, expires_at, created_at)
+                 VALUES ('test-id', 'aabbcc', X'00', 1, 1)",
+                [],
+            )
+            .unwrap();
+
+        let deleted = db.expire_bundles().unwrap();
+        assert_eq!(deleted, 1, "expired bundle should be deleted");
+
+        // A second call on an empty table should delete nothing.
+        let deleted2 = db.expire_bundles().unwrap();
+        assert_eq!(deleted2, 0);
+    }
+
+    #[test]
+    fn expire_bundles_preserves_sos() {
+        // SOS bundles have expires_at = NULL and must survive expiry sweeps.
+        let db = Db::open(":memory:").unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO bundles (id, dest_pubkey, raw, expires_at, created_at)
+                 VALUES ('sos-id', 'aabbcc', X'00', NULL, 1)",
+                [],
+            )
+            .unwrap();
+
+        let deleted = db.expire_bundles().unwrap();
+        assert_eq!(
+            deleted, 0,
+            "SOS bundle (expires_at = NULL) must not be deleted"
+        );
     }
 
     #[test]
