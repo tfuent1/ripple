@@ -27,6 +27,7 @@
 //!  -1  = not initialized (call mesh_init first)
 //!  -2  = serialization error
 //!  -3  = internal error (store, routing, crypto, etc.)
+//!  -4  = already initialized (mesh_init called twice)
 
 use ripple_core::bundle::{BundleBuilder, Destination, Priority};
 use ripple_core::crypto::Identity;
@@ -74,6 +75,7 @@ pub const OK: i32 = 0;
 pub const ERR_NOT_INIT: i32 = -1;
 pub const ERR_SERIALIZE: i32 = -2;
 pub const ERR_INTERNAL: i32 = -3;
+pub const ERR_ALREADY_INIT: i32 = -4;
 
 // ── Helper: write an allocated buffer to out-params ───────────────────────────
 
@@ -174,11 +176,11 @@ pub unsafe extern "C" fn mesh_init(
     // this line the local variable no longer exists — the OnceLock owns it.
     // There is exactly one copy of the Identity in the process.
     if IDENTITY.set(Mutex::new(identity)).is_err() {
-        return ERR_NOT_INIT;
+        return ERR_ALREADY_INIT;
     }
 
     if ROUTER.set(Mutex::new(router)).is_err() {
-        return ERR_NOT_INIT;
+        return ERR_ALREADY_INIT;
     }
 
     OK

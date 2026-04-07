@@ -75,7 +75,16 @@ pub async fn fetch_inbox(
         .as_array()
         .ok_or_else(|| RelayError::Parse("missing bundles field".into()))?
         .iter()
-        .filter_map(|v| B64.decode(v.as_str()?).ok())
+        .filter_map(|v| {
+            let s = v.as_str()?;
+            match B64.decode(s) {
+                Ok(bytes) => Some(bytes),
+                Err(e) => {
+                    tracing::warn!("skipping undecodable inbox entry: {e}");
+                    None
+                }
+            }
+        })
         .collect();
 
     Ok(bundles)

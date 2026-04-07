@@ -177,7 +177,13 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
     // ever acquire it, which is a deadlock.
     let bundles: Vec<Bundle> = {
         let r = lock_router(router);
-        r.outbound_bundles().unwrap_or_default()
+        match r.outbound_bundles() {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("failed to read outbound bundles: {e}");
+                vec![]
+            }
+        }
     }; // <-- lock released here
 
     for bundle in bundles {
