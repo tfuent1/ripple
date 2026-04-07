@@ -31,6 +31,28 @@ const RATE_LIMIT_MAX: u32 = 60;
 /// The rolling window for rate limiting.
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 
+//__Utils________________________________________________________________________
+
+pub(crate) fn lock_db(mutex: &Arc<Mutex<Db>>) -> std::sync::MutexGuard<'_, Db> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("db mutex was poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
+fn lock_rate_limiter(mutex: &Arc<Mutex<RateLimiter>>) -> std::sync::MutexGuard<'_, RateLimiter> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("rate_limiter mutex was poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 /// Per-IP submission counter for rate limiting.
@@ -60,6 +82,7 @@ struct RateLimiter {
 }
 
 impl RateLimiter {
+
     /// Returns `true` if the request should be allowed, `false` if rate limited.
     fn check_and_increment(&mut self, ip: std::net::IpAddr) -> bool {
         let now = Instant::now();
@@ -159,7 +182,7 @@ async fn post_bundle(
     // The `{}` block ensures the MutexGuard is dropped before we do any
     // DB work. Never hold two locks at the same time — classic deadlock setup.
     let allowed = {
-        let mut rl = state.rate_limiter.lock().unwrap();
+        let mut rl = lock_rate_limiter(&state.rate_limiter);
         rl.check_and_increment(addr.ip())
     };
 
@@ -168,7 +191,7 @@ async fn post_bundle(
         return StatusCode::TOO_MANY_REQUESTS;
     }
 
-    let db = state.db.lock().unwrap();
+    let db = lock_db(&state.db);
     match db.insert_bundle(&body) {
         Ok(true) => {
             info!("stored bundle from {}", addr.ip());
@@ -201,7 +224,7 @@ async fn get_inbox(
     State(state): State<AppState>,
     Path(pubkey_hex): Path<String>,
 ) -> Result<Json<InboxResponse>, StatusCode> {
-    let db = state.db.lock().unwrap();
+    let db = lock_db(&state.db);
     let rows = db
         .bundles_for_pubkey(&pubkey_hex)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -217,7 +240,7 @@ async fn get_inbox(
 
 /// Acknowledge delivery — remove a bundle by UUID.
 async fn delete_bundle(State(state): State<AppState>, Path(bundle_id): Path<String>) -> StatusCode {
-    let db = state.db.lock().unwrap();
+    let db = lock_db(&state.db);
     match db.delete_bundle(&bundle_id) {
         Ok(_) => StatusCode::OK,
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR,

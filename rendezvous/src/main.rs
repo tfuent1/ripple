@@ -75,7 +75,7 @@ async fn main() {
         loop {
             interval.tick().await;
             let count = {
-                let db = sweep_db.lock().unwrap();
+                let db = server::lock_db(&sweep_db);
                 db.expire_bundles().unwrap_or(0)
             };
             if count > 0 {

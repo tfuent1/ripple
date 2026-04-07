@@ -83,7 +83,7 @@ pub async fn run(router: Router, identity: Identity, server_url: String, quiet: 
             let now = unix_now();
 
             let result = {
-                let mut r = router_tick.lock().unwrap();
+                let mut r = lock_router(&router_tick);
                 r.mesh_tick(now)
             };
 
@@ -133,6 +133,22 @@ pub async fn run(router: Router, identity: Identity, server_url: String, quiet: 
     }
 }
 
+/// Acquire the router lock, recovering from mutex poisoning.
+///
+/// Poisoning means a previous lock holder panicked. The Router's
+/// internal state is still structurally valid — SQLite protects its
+/// own integrity, and PeerManager is a cache. We log the incident
+/// and keep running rather than crashing the daemon.
+fn lock_router(mutex: &Arc<Mutex<Router>>) -> std::sync::MutexGuard<'_, Router> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            warn!("router mutex was poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 // ── Combined poll + relay outbound ────────────────────────────────────────────
 
 /// One relay cycle: submit outbound bundles, then fetch and process inbound.
@@ -160,7 +176,7 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
     // if the task is suspended while holding the lock, no other task can
     // ever acquire it, which is a deadlock.
     let bundles: Vec<Bundle> = {
-        let r = router.lock().unwrap();
+        let r = lock_router(router);
         r.outbound_bundles().unwrap_or_default()
     }; // <-- lock released here
 
@@ -175,7 +191,7 @@ async fn relay_outbound(router: &Arc<Mutex<Router>>, client: &reqwest::Client, s
                     // "submitted" = sent to rendezvous server (outbound done).
                     // "delivered" = received by the destination (inbound processed).
                     // These are separate flags — see store migration 002.
-                    let r = router.lock().unwrap();
+                    let r = lock_router(router);
                     if let Err(e) = r.mark_submitted(bundle.id) {
                         warn!("mark_submitted failed for {}: {e}", bundle.id);
                     }
@@ -230,7 +246,7 @@ async fn fetch_inbound(
         // Same pattern as relay_outbound: hold lock only for the synchronous
         // call, drop it before the next .await.
         let actions = {
-            let mut r = router.lock().unwrap();
+            let mut r = lock_router(router);
             r.on_bundle_received(bundle, now)
         };
 
@@ -239,7 +255,7 @@ async fn fetch_inbound(
                 handle_actions(actions, router, identity, quiet);
                 // Mark delivered locally so we don't process it again.
                 {
-                    let r = router.lock().unwrap();
+                    let r = lock_router(router);
                     if let Err(e) = r.mark_delivered(bundle_id) {
                         warn!("mark_delivered failed for {bundle_id}: {e}");
                     }
@@ -272,7 +288,7 @@ fn handle_actions(
                 // the closing `}`. This keeps the lock held for the minimum
                 // time necessary — no lock is held during the decrypt or print.
                 let bundle = {
-                    let r = router.lock().unwrap();
+                    let r = lock_router(router);
                     r.get_bundle(bundle_id)
                 };
 
@@ -296,7 +312,7 @@ fn handle_actions(
                                 // tracing noise but keep message output visible.
                                 println!("📨  from {} | {}", hex::encode(&b.origin[..8]), text);
                                 // Mark displayed so `ripple status` unread count clears.
-                                let r = router.lock().unwrap();
+                                let r = lock_router(router);
                                 if let Err(e) = r.mark_displayed(bundle_id) {
                                     warn!("mark_displayed failed for {bundle_id}: {e}");
                                 }
