@@ -28,6 +28,10 @@
 //!  -2  = serialization error
 //!  -3  = internal error (store, routing, crypto, etc.)
 //!  -4  = already initialized (mesh_init called twice)
+//!  -5  = mutex poisoned (previous call panicked; state may be recoverable)
+//!  -6  = bad input (invalid transport code, wrong byte length, bad UTF-8, etc.)
+//!  -7  = store/routing error (SQLite or routing layer failure)
+//!  -8  = crypto error (signing, encryption, or key derivation failure)
 
 use ripple_core::bundle::{BundleBuilder, Destination, Priority};
 use ripple_core::crypto::Identity;
@@ -76,6 +80,10 @@ pub const ERR_NOT_INIT: i32 = -1;
 pub const ERR_SERIALIZE: i32 = -2;
 pub const ERR_INTERNAL: i32 = -3;
 pub const ERR_ALREADY_INIT: i32 = -4;
+pub const ERR_POISONED: i32 = -5;
+pub const ERR_BAD_INPUT: i32 = -6;
+pub const ERR_STORE: i32 = -7;
+pub const ERR_CRYPTO: i32 = -8;
 
 // ── Helper: write an allocated buffer to out-params ───────────────────────────
 
@@ -124,8 +132,8 @@ fn write_output<T: Serialize>(value: &T, out_ptr: *mut *mut u8, out_len: *mut us
 ///                    identity is generated (useful for testing).
 /// `identity_len`   — must be 32.
 ///
-/// Returns OK on success, ERR_INTERNAL if the store can't be opened,
-/// or ERR_NOT_INIT if called a second time (OnceLock only sets once).
+/// Returns OK on success, ERR_STORE if the database can't be opened,
+/// or ERR_ALREADY_INIT if called a second time (OnceLock only sets once).
 ///
 /// # Safety
 /// `db_path` must be a valid pointer to `db_path_len` bytes of UTF-8 data.
@@ -141,14 +149,14 @@ pub unsafe extern "C" fn mesh_init(
     let path_bytes = unsafe { std::slice::from_raw_parts(db_path, db_path_len) };
     let path = match std::str::from_utf8(path_bytes) {
         Ok(s) => s,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_BAD_INPUT,
     };
 
     let identity = if identity_len == 32 && !identity_bytes.is_null() {
         let key_bytes = unsafe { std::slice::from_raw_parts(identity_bytes, 32) };
         let arr: [u8; 32] = match key_bytes.try_into() {
             Ok(a) => a,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_BAD_INPUT,
         };
         // All-zeros means "generate a new identity".
         if arr == [0u8; 32] {
@@ -164,7 +172,7 @@ pub unsafe extern "C" fn mesh_init(
 
     let store = match Store::new(path) {
         Ok(s) => s,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_STORE,
     };
 
     let router = Router::new(store, x25519_pubkey);
@@ -228,29 +236,29 @@ pub unsafe extern "C" fn mesh_peer_encountered(
     let ed_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(ed25519_pubkey, 32).try_into() {
             Ok(a) => a,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_BAD_INPUT,
         }
     };
     let x_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(x25519_pubkey, 32).try_into() {
             Ok(a) => a,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_BAD_INPUT,
         }
     };
 
     let transport = match Transport::from_u8(transport) {
         Some(t) => t,
-        None => return ERR_INTERNAL,
+        None => return ERR_BAD_INPUT,
     };
 
     let mut router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL, // poisoned mutex
+        Err(_) => return ERR_POISONED, // poisoned mutex
     };
 
     let offer: SyncOffer = match router.on_peer_encountered(ed_key, x_key, transport, rssi, now) {
         Ok(o) => o,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_STORE,
     };
 
     // SyncOffer contains Vec<Uuid>. Serialize the IDs as Vec<[u8; 16]> —
@@ -291,17 +299,17 @@ pub unsafe extern "C" fn mesh_bundle_received(
 
     let bundle = match ripple_core::bundle::Bundle::from_bytes(bytes) {
         Ok(b) => b,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_BAD_INPUT,
     };
 
     let mut router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_POISONED,
     };
 
     let actions = match router.on_bundle_received(bundle, now) {
         Ok(a) => a,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_STORE,
     };
 
     let serializable = actions_to_serializable(&actions);
@@ -329,24 +337,24 @@ pub unsafe extern "C" fn mesh_bundle_forwarded(
     };
 
     if bundle_id_len != 16 {
-        return ERR_INTERNAL;
+        return ERR_BAD_INPUT;
     }
 
     let id_bytes = unsafe { std::slice::from_raw_parts(bundle_id_bytes, 16) };
     let id_arr: [u8; 16] = match id_bytes.try_into() {
         Ok(a) => a,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_BAD_INPUT,
     };
     let bundle_id = Uuid::from_bytes(id_arr);
 
     let mut router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_POISONED,
     };
 
     match router.on_bundle_forwarded(bundle_id) {
         Ok(_) => OK,
-        Err(_) => ERR_INTERNAL,
+        Err(_) => ERR_STORE,
     }
 }
 
@@ -380,22 +388,32 @@ pub unsafe extern "C" fn mesh_bundles_for_peer(
     let x_key: [u8; 32] = unsafe {
         match std::slice::from_raw_parts(x25519_pubkey, 32).try_into() {
             Ok(a) => a,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_BAD_INPUT,
         }
     };
 
     let router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_POISONED,
     };
 
     let bundles = match router.bundles_for_peer(&x_key) {
         Ok(b) => b,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_STORE,
     };
 
     // Serialize each bundle to its wire bytes, then wrap the whole list.
-    let bundle_bytes: Vec<Vec<u8>> = bundles.iter().filter_map(|b| b.to_bytes().ok()).collect();
+    // If any bundle fails to serialize, return ERR_SERIALIZE rather than
+    // silently dropping it from the list — a bundle stuck in the store
+    // that can never be serialized would be offered every encounter but
+    // never actually transmitted, creating a silent data loss loop.
+    let mut bundle_bytes: Vec<Vec<u8>> = Vec::with_capacity(bundles.len());
+    for b in &bundles {
+        match b.to_bytes() {
+            Ok(bytes) => bundle_bytes.push(bytes),
+            Err(_) => return ERR_SERIALIZE,
+        }
+    }
 
     write_output(&bundle_bytes, out_bundles, out_bundles_len)
 }
@@ -447,7 +465,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
         let pk: [u8; 32] = unsafe {
             match std::slice::from_raw_parts(dest_pubkey, 32).try_into() {
                 Ok(a) => a,
-                Err(_) => return ERR_INTERNAL,
+                Err(_) => return ERR_BAD_INPUT,
             }
         };
         Destination::Peer(pk)
@@ -457,7 +475,7 @@ pub unsafe extern "C" fn mesh_create_bundle(
         0 => Priority::Normal,
         1 => Priority::Urgent,
         2 => Priority::Sos,
-        _ => return ERR_INTERNAL,
+        _ => return ERR_BAD_INPUT,
     };
 
     let payload_slice = unsafe { std::slice::from_raw_parts(payload, payload_len) };
@@ -473,14 +491,14 @@ pub unsafe extern "C" fn mesh_create_bundle(
     let bundle = {
         let identity = match identity_mutex.lock() {
             Ok(g) => g,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_POISONED,
         };
         match BundleBuilder::new(destination, priority)
             .payload(payload_slice.to_vec())
             .build(&identity, now)
         {
             Ok(b) => b,
-            Err(_) => return ERR_INTERNAL,
+            Err(_) => return ERR_CRYPTO,
         }
         // `identity` (the MutexGuard) is dropped here — IDENTITY lock released.
     };
@@ -488,11 +506,11 @@ pub unsafe extern "C" fn mesh_create_bundle(
     // IDENTITY lock is released. Now safe to acquire ROUTER.
     let router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_POISONED,
     };
 
     if router.queue_outbound(&bundle).is_err() {
-        return ERR_INTERNAL;
+        return ERR_STORE;
     }
 
     let bytes = match bundle.to_bytes() {
@@ -530,12 +548,12 @@ pub unsafe extern "C" fn mesh_tick(
 
     let mut router = match router_mutex.lock() {
         Ok(r) => r,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_POISONED,
     };
 
     let actions = match router.mesh_tick(now) {
         Ok(a) => a,
-        Err(_) => return ERR_INTERNAL,
+        Err(_) => return ERR_STORE,
     };
 
     let serializable = actions_to_serializable(&actions);
