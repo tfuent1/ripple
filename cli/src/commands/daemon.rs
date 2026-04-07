@@ -18,6 +18,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+// Compile-time check: Arc<Mutex<Router>> must be Send + Sync for tokio::spawn.
+// If a future refactor breaks this, the build fails here with a clear error
+// instead of a cryptic "future is not Send" diagnostic in the async task.
+fn _assert_router_is_send_sync()
+where
+    Arc<Mutex<Router>>: Send + Sync,
+{
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 /// Start the daemon. Takes ownership of `router` and `identity`, runs forever.

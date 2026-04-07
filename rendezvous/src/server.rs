@@ -82,7 +82,6 @@ struct RateLimiter {
 }
 
 impl RateLimiter {
-
     /// Returns `true` if the request should be allowed, `false` if rate limited.
     fn check_and_increment(&mut self, ip: std::net::IpAddr) -> bool {
         let now = Instant::now();

@@ -10,7 +10,7 @@
 //! Run: cargo test -p ripple-ffi --test ffi_roundtrip
 
 use ripple_ffi::{
-    mesh_bundle_received, mesh_create_bundle, mesh_free, mesh_init, mesh_tick, ERR_NOT_INIT, OK,
+    mesh_bundle_received, mesh_create_bundle, mesh_free, mesh_init, mesh_tick, ERR_ALREADY_INIT, OK,
 };
 
 fn init() -> ripple_core::crypto::Identity {
@@ -108,13 +108,13 @@ fn full_ffi_roundtrip() {
     assert_eq!(rc, OK);
     unsafe { mesh_free(out_tick, tick_len) };
 
-    // Second mesh_init must return ERR_NOT_INIT.
+    // Second mesh_init must return ERR_ALREADY_INIT.
     let identity2 = ripple_core::crypto::Identity::generate();
     let pk2 = identity2.to_private_bytes();
     let db = ":memory:";
     let rc = unsafe { mesh_init(db.as_ptr(), db.len(), pk2.as_ptr(), pk2.len()) };
     assert_eq!(
-        rc, ERR_NOT_INIT,
-        "second mesh_init must return ERR_NOT_INIT"
+        rc, ERR_ALREADY_INIT,
+        "second mesh_init must return ERR_ALREADY_INIT"
     );
 }
