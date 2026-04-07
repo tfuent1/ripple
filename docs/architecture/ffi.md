@@ -34,12 +34,17 @@ Calling it twice is undefined behavior.
 
 Every function returns an `i32` status code.
 
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `-1` | Not initialized — call `mesh_init` first |
-| `-2` | Serialization error |
-| `-3` | Internal error (store, routing, crypto) |
+| Code | Constant | Meaning |
+|---|---|---|
+| `0` | `OK` | Success |
+| `-1` | `ERR_NOT_INIT` | Not initialized — call `mesh_init` first |
+| `-2` | `ERR_SERIALIZE` | Serialization error |
+| `-3` | `ERR_INTERNAL` | Internal error (catch-all) |
+| `-4` | `ERR_ALREADY_INIT` | Already initialized — `mesh_init` called twice |
+| `-5` | `ERR_POISONED` | Mutex poisoned — previous call panicked |
+| `-6` | `ERR_BAD_INPUT` | Bad input — invalid transport code, wrong byte length, bad UTF-8 |
+| `-7` | `ERR_STORE` | Store/routing error — SQLite or routing layer failure |
+| `-8` | `ERR_CRYPTO` | Crypto error — signing, encryption, or key derivation failure |
 
 ## Function Reference
 
@@ -58,7 +63,7 @@ null-terminated — length given by `db_path_len`). Loads the identity from
 `identity_bytes` (32-byte Ed25519 private key). If `identity_bytes` is all
 zeros or `identity_len` is not 32, a new identity is generated.
 
-Initializes the global Router singleton. Returns `-1` if called a second
+Initializes the global Router singleton. Returns `-4(ERR_ALREADY_INIT)` if called a second
 time — `OnceLock` sets exactly once.
 
 Must be called before any other function.
